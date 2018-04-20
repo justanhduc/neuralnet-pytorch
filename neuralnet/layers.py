@@ -341,7 +341,7 @@ class ConvBNAct(Layer):
 
 
 class ResNetBasicBlock(Layer):
-    def __init__(self, input_shape, num_filters, filter_size=3, stride=1, activation='relu', groups=1, **kwargs):
+    def __init__(self, input_shape, num_filters, filter_size=3, stride=1, activation='relu', groups=1, batch_norm=True, **kwargs):
         super(ResNetBasicBlock, self).__init__()
         self.input_shape = input_shape
         self.num_filters = num_filters
@@ -349,17 +349,20 @@ class ResNetBasicBlock(Layer):
         self.stride = stride
         self.activation = utils.function[activation]
         self.groups = groups
+        self.batch_norm = batch_norm
         self.kwargs = kwargs
-        self.convbnact1 = ConvBNAct(input_shape, num_filters, filter_size, 'He_normal', stride=stride, activation=activation,
-                                    show=False, **kwargs)
-        self.convbnact2 = ConvBNAct(self.convbnact1.output_shape, num_filters, filter_size, 'He_normal', stride=1,
-                                    activation='linear', show=False, **kwargs)
+
+        base_layer = ConvBNAct if batch_norm else Conv2DLayer
+        self.convbnact1 = base_layer(input_shape=input_shape, num_filters=num_filters, filter_size=filter_size,
+                                     init_mode='He_normal', stride=stride, activation=activation, show=False, **kwargs)
+        self.convbnact2 = base_layer(input_shape=self.convbnact1.output_shape, num_filters=num_filters,
+                                     filter_size=filter_size, init_mode='He_normal', stride=1, activation='linear', show=False, **kwargs)
         self.trainable += self.convbnact1.trainable + self.convbnact2.trainable
         self.regularizable += self.convbnact1.regularizable + self.convbnact2.regularizable
 
         self.downsample = lambda x: x
         if stride > 1 or input_shape[0] != num_filters:
-            self.downsample = ConvBNAct(input_shape, num_filters, 1, stride=stride, no_bias=True, activation='linear')
+            self.downsample = base_layer(input_shape=input_shape, num_filters=num_filters, filter_size=1, stride=stride, no_bias=True, activation='linear')
             self.trainable += self.downsample.trainable
             self.regularizable += self.downsample.regularizable
 

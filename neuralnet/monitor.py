@@ -55,13 +55,8 @@ class Monitor(utils.ConfigParser):
     def plot(self, name, value):
         self._num_since_last_flush[name][self._iter[0]] = value
 
-    def save_image(self, name, tensor_img):
-        '''
-
-        :param tensor_img: (int, int, int, int)
-        :return:
-        '''
-        self._img_since_last_flush[name][self._iter[0]] = tensor_img
+    def save_image(self, name, tensor_img, callback=None):
+        self._img_since_last_flush[name][self._iter[0]] = tensor_img if callback is None else callback(tensor_img)
 
     def flush(self):
         prints = []
@@ -82,7 +77,7 @@ class Monitor(utils.ConfigParser):
 
         for name, vals in list(self._img_since_last_flush.items()):
             for val in vals.values():
-                if val.dtype == 'float32':
+                if val.dtype != 'uint8':
                     val = (255.99 * val).astype('uint8')
                 if len(val.shape) == 4:
                     for num in range(val.shape[0]):

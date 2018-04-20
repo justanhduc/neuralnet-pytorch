@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-def HuberLoss(x, y, thres=1., sum=False):
+def huber_loss(x, y, thres=1., sum=False):
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
     e = T.abs(x - y)
@@ -23,7 +23,7 @@ def _flip_tensor(filters):
     return T.from_numpy(flipped.copy())
 
 
-def FirstDerivativeError(x, y, p=2, sum=False):
+def first_derivative_error(x, y, p=2, sum=False):
     if x.ndimension() != 4 and y.ndimension() != 4:
         raise TypeError('y and y_pred should have four dimensions')
     kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32'))
@@ -43,10 +43,10 @@ def FirstDerivativeError(x, y, p=2, sum=False):
     y_grad_x = F.conv2d(y, kern_x, padding=1)
     y_grad_y = F.conv2d(y, kern_y, padding=1)
     y_grad = T.sqrt(y_grad_x ** 2 + y_grad_y ** 2 + 1e-10)
-    return NormError(x_grad, y_grad, p, sum=sum)
+    return norm_error(x_grad, y_grad, p, sum=sum)
 
 
-def NormError(x, y, p=2, sum=False):
+def norm_error(x, y, p=2, sum=False):
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
     return T.mean(T.abs(x - y) ** p) if not sum else T.sum(T.abs(x - y) ** p)
@@ -60,7 +60,7 @@ def _fspecial_gauss(size, sigma):
     return g / np.sum(g)
 
 
-def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
+def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
     """Return the Structural Similarity Map between `img1` and `img2`.
     This function attempts to match the functionality of ssim_index_new.m by
     Zhou Wang: http://www.cns.nyu.edu/~lcv/ssim/msssim.zip
@@ -127,6 +127,49 @@ def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     return output
 
 
-def PSNR(x, y):
+def _laplacian_pyramid(img, levels=3, size=5, sigma=2.):
+    pyr = []
+    current = img
+    gauss_kern = F.Variable(T.from_numpy(_fspecial_gauss(size, sigma)).expand(current.shape[1], 1, size, size)).type(T.FloatTensor)
+    if T.cuda.is_available():
+        gauss_kern = gauss_kern.cuda()
+    for l in range(levels):
+        gauss = F.conv2d(current, gauss_kern, stride=1, padding=size//2, groups=current.shape[1])
+        diff = current - gauss
+        pyr.append(diff)
+        current = F.avg_pool2d(gauss, 2)
+    pyr.append(current)
+    return pyr
+
+
+def _gaussian_pyramid(img, levels=3, size=5, sigma=2.):
+    pyr = []
+    current = img
+    gauss_kern = F.Variable(T.from_numpy(_fspecial_gauss(size, sigma)).expand(current.shape[1], 1, size, size)).type(T.FloatTensor)
+    if T.cuda.is_available():
+        gauss_kern = gauss_kern.cuda()
+    for l in range(levels):
+        gauss = F.conv2d(current, gauss_kern, stride=1, padding=size // 2, groups=current.shape[1])
+        pyr.append(gauss)
+        current = F.avg_pool2d(gauss, 2)
+    pyr.append(current)
+    return pyr
+
+
+def pyramid_loss(img1, img2, type='laplacian', levels=3, size=5, sigma=2., p=1, loss_sum=False, weights=None):
+    if weights is None:
+        weights = [1 / (levels + 1)]
+    pyramid = _laplacian_pyramid if type == 'laplacian' else _gaussian_pyramid
+    py1 = pyramid(img1, levels, size, sigma)
+    py2 = pyramid(img2, levels, size, sigma)
+    if len(weights) == 1:
+        weights = weights * (levels + 1)
+    elif 1 < len(weights) < levels + 1:
+        raise NotImplementedError
+    losses = [norm_error(a, b, p, loss_sum) * w for a, b, w in zip(py1, py2, weights)]
+    return sum(losses)
+
+
+def psnr(x, y):
     """PSNR for [0,1] images"""
-    return -10 * T.log(T.mean((y - x) ** 2)) / np.log(10.)
+    return -10 * T.log(norm_error(x, y)) / np.log(10.)
