@@ -13,6 +13,12 @@ A high level framework for general purpose neural networks in Pytorch.
 pip install --upgrade neuralnet-pytorch
 ```
 
+To install the Git version
+
+```
+pip instal git+git://github.com/justanhduc/neuralnet-pytorch.git@master
+```
+
 
 ## Usages
 To create a new model, simply make a new model class and inherit from Model in model.py
