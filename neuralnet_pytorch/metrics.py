@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 
 
-def huber_loss(x, y, thres=1., sum=False):
+def HuberLoss(x, y, thres=1.):
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
     e = T.abs(x - y)
@@ -11,8 +11,7 @@ def huber_loss(x, y, thres=1., sum=False):
     less_than = .5 * e**2
     mask = e >= thres
     mask = mask.type(e.data.type())
-    return T.mean(mask * larger_than_equal_to + (1. - mask) * less_than) if not sum \
-        else T.sum(mask * larger_than_equal_to + (1. - mask) * less_than)
+    return T.mean(mask * larger_than_equal_to + (1. - mask) * less_than)
 
 
 def _flip_tensor(filters):
@@ -23,14 +22,14 @@ def _flip_tensor(filters):
     return T.from_numpy(flipped.copy())
 
 
-def first_derivative_error(x, y, p=2, sum=False):
+def FirstDerivativeError(x, y, p=2):
     if x.ndimension() != 4 and y.ndimension() != 4:
         raise TypeError('y and y_pred should have four dimensions')
     kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32'))
-    kern_x = F.Variable(_flip_tensor(kern_x.expand(y.shape[1], y.shape[1], 3, 3)))
+    kern_x = _flip_tensor(kern_x.expand(y.shape[1], y.shape[1], 3, 3))
 
     kern_y = T.from_numpy(np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype='float32'))
-    kern_y = F.Variable(_flip_tensor(kern_y.expand(y.shape[1], y.shape[1], 3, 3)))
+    kern_y = _flip_tensor(kern_y.expand(y.shape[1], y.shape[1], 3, 3))
 
     if T.cuda.is_available():
         kern_x = kern_x.cuda()
@@ -43,13 +42,13 @@ def first_derivative_error(x, y, p=2, sum=False):
     y_grad_x = F.conv2d(y, kern_x, padding=1)
     y_grad_y = F.conv2d(y, kern_y, padding=1)
     y_grad = T.sqrt(y_grad_x ** 2 + y_grad_y ** 2 + 1e-10)
-    return norm_error(x_grad, y_grad, p, sum=sum)
+    return NormError(x_grad, y_grad, p)
 
 
-def norm_error(x, y, p=2, sum=False):
+def NormError(x, y, p=2):
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
-    return T.mean(T.abs(x - y) ** p) if not sum else T.sum(T.abs(x - y) ** p)
+    return T.mean(T.abs(x - y) ** p)
 
 
 def _fspecial_gauss(size, sigma):
@@ -60,7 +59,7 @@ def _fspecial_gauss(size, sigma):
     return g / np.sum(g)
 
 
-def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
+def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
     """Return the Structural Similarity Map between `img1` and `img2`.
     This function attempts to match the functionality of ssim_index_new.m by
     Zhou Wang: http://www.cns.nyu.edu/~lcv/ssim/msssim.zip
@@ -95,7 +94,7 @@ def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     sigma = (size * filter_sigma / filter_size) if filter_size else 1.
 
     if filter_size:
-        window = F.Variable(_flip_tensor(T.from_numpy(_fspecial_gauss(size, sigma))).view(1, 1, size, size)).type(T.FloatTensor)
+        window = _flip_tensor(T.tensor(_fspecial_gauss(size, sigma))).view(1, 1, size, size).type(T.float32)
         if T.cuda.is_available():
             window = window.cuda()
         mu1 = F.conv2d(img1, window)
@@ -127,49 +126,6 @@ def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     return output
 
 
-def _laplacian_pyramid(img, levels=3, size=5, sigma=2.):
-    pyr = []
-    current = img
-    gauss_kern = F.Variable(T.from_numpy(_fspecial_gauss(size, sigma)).expand(current.shape[1], 1, size, size)).type(T.FloatTensor)
-    if T.cuda.is_available():
-        gauss_kern = gauss_kern.cuda()
-    for l in range(levels):
-        gauss = F.conv2d(current, gauss_kern, stride=1, padding=size//2, groups=current.shape[1])
-        diff = current - gauss
-        pyr.append(diff)
-        current = F.avg_pool2d(gauss, 2)
-    pyr.append(current)
-    return pyr
-
-
-def _gaussian_pyramid(img, levels=3, size=5, sigma=2.):
-    pyr = []
-    current = img
-    gauss_kern = F.Variable(T.from_numpy(_fspecial_gauss(size, sigma)).expand(current.shape[1], 1, size, size)).type(T.FloatTensor)
-    if T.cuda.is_available():
-        gauss_kern = gauss_kern.cuda()
-    for l in range(levels):
-        gauss = F.conv2d(current, gauss_kern, stride=1, padding=size // 2, groups=current.shape[1])
-        pyr.append(gauss)
-        current = F.avg_pool2d(gauss, 2)
-    pyr.append(current)
-    return pyr
-
-
-def pyramid_loss(img1, img2, type='laplacian', levels=3, size=5, sigma=2., p=1, loss_sum=False, weights=None):
-    if weights is None:
-        weights = [1 / (levels + 1)]
-    pyramid = _laplacian_pyramid if type == 'laplacian' else _gaussian_pyramid
-    py1 = pyramid(img1, levels, size, sigma)
-    py2 = pyramid(img2, levels, size, sigma)
-    if len(weights) == 1:
-        weights = weights * (levels + 1)
-    elif 1 < len(weights) < levels + 1:
-        raise NotImplementedError
-    losses = [norm_error(a, b, p, loss_sum) * w for a, b, w in zip(py1, py2, weights)]
-    return sum(losses)
-
-
-def psnr(x, y):
+def PSNR(x, y):
     """PSNR for [0,1] images"""
-    return -10 * T.log(norm_error(x, y)) / np.log(10.)
+    return -10 * T.log(T.mean((y - x) ** 2)) / np.log(10.)

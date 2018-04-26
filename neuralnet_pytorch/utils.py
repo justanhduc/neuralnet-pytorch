@@ -78,21 +78,10 @@ def ycbcr2rgb(img):
     return T.cat((R.unsqueeze(1), G.unsqueeze(1), B.unsqueeze(1)), 1)
 
 
-def var_to_numpy(var):
-    return var.cpu().data.numpy() if T.cuda.is_available() else var.data.numpy()
-
-
-def numpy_to_var(numpy):
-    var = F.Variable(T.from_numpy(numpy)).type(T.FloatTensor)
-    if T.cuda.is_available():
-        var = var.cuda()
-    return var
-
-
 function = {'relu': lambda x, **kwargs: F.relu(x, True), 'linear': lambda x, **kwargs: x,
             'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: F.tanh(x)}
-init = {'He_normal': nn.init.kaiming_normal, 'He_uniform': nn.init.kaiming_uniform,
-        'Xavier_normal': nn.init.xavier_normal, 'Xavier_uniform': nn.init.xavier_uniform}
+init = {'He_normal': nn.init.kaiming_normal_, 'He_uniform': nn.init.kaiming_uniform,
+        'Xavier_normal': nn.init.xavier_normal_, 'Xavier_uniform': nn.init.xavier_uniform}
 loss = {'ce': F.cross_entropy, 'mse': F.mse_loss, 'bce': F.binary_cross_entropy, 'bcel': F.binary_cross_entropy_with_logits,
         'l1': F.l1_loss}
 optimizer = {'adam': adam, 'sgd': sgd, 'rmsprop': rmsprop}

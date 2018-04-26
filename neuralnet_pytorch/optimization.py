@@ -1,7 +1,7 @@
 import torch.nn.functional as F
 import numpy as np
 
-from neuralnet import utils
+from neuralnet_pytorch import utils
 
 
 class Optimizer(utils.ConfigParser):
@@ -31,12 +31,13 @@ class Optimizer(utils.ConfigParser):
         return utils.loss[self.method](pred, target, **kwargs)
 
     def get_optimizer(self, params):
+        print('Using %s optimizer' % self.method)
         self.optimizer = utils.optimizer[self.method](params, **{'lr': self.learning_rate, 'momentum': self.momentum,
                                                                  'beta1': self.beta1, 'beta2': self.beta2, 'epsilon': self.epsilon,
                                                                  'nesterov': self.nesterov})
 
     def learn(self, loss=None, pred=None, target=None, **kwargs):
         cost = loss if loss is not None else self.compute_cost(pred, target, **kwargs)
-        cost.backward()
+        cost.backward(retain_graph=True)
         self.optimizer.step()
         self.optimizer.zero_grad()

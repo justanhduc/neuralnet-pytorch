@@ -3,8 +3,8 @@ import torch.nn as nn
 import abc
 import numpy as np
 
-from neuralnet import optimization
-from neuralnet import training
+from neuralnet_pytorch import optimization
+from neuralnet_pytorch import training
 
 
 class Model(optimization.Optimizer, training.Training, nn.Sequential, metaclass=abc.ABCMeta):

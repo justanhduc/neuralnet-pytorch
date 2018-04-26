@@ -13,17 +13,17 @@ from scipy.misc import imsave
 import os
 from shutil import copyfile
 
-from neuralnet import utils, model
+from neuralnet_pytorch import utils, model
 
 
 class Monitor(utils.ConfigParser):
     def __init__(self, config_file):
         super(Monitor, self).__init__(config_file)
-        self.name = self.config['model']['name']
         self._num_since_beginning = collections.defaultdict(lambda: {})
         self._num_since_last_flush = collections.defaultdict(lambda: {})
         self._img_since_last_flush = collections.defaultdict(lambda: {})
         self._iter = [0]
+        self.name = self.config['model']['name']
         self.root = 'results' if self.config['result']['root'] is None else self.config['result']['root']
         self.path = self.root + '/' + self.name
         if not os.path.exists(self.root):
@@ -50,13 +50,21 @@ class Monitor(utils.ConfigParser):
         self._iter[0] += 1
 
     def reset(self):
-        self._iter[0] = 0
+        self._num_since_beginning = collections.defaultdict(lambda: {})
+        self._num_since_last_flush = collections.defaultdict(lambda: {})
+        self._img_since_last_flush = collections.defaultdict(lambda: {})
+        self._iter = [0]
 
     def plot(self, name, value):
         self._num_since_last_flush[name][self._iter[0]] = value
 
-    def save_image(self, name, tensor_img, callback=None):
-        self._img_since_last_flush[name][self._iter[0]] = tensor_img if callback is None else callback(tensor_img)
+    def save_image(self, name, tensor_img, callback=lambda x: x):
+        '''
+
+        :param tensor_img: (int, int, int, int)
+        :return:
+        '''
+        self._img_since_last_flush[name][self._iter[0]] = callback(tensor_img)
 
     def flush(self):
         prints = []
@@ -77,7 +85,7 @@ class Monitor(utils.ConfigParser):
 
         for name, vals in list(self._img_since_last_flush.items()):
             for val in vals.values():
-                if val.dtype != 'uint8':
+                if val.dtype == 'float32':
                     val = (255.99 * val).astype('uint8')
                 if len(val.shape) == 4:
                     for num in range(val.shape[0]):

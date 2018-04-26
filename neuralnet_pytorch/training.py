@@ -1,4 +1,4 @@
-from neuralnet import utils
+from neuralnet_pytorch import utils
 
 
 class Training(utils.ConfigParser):
