@@ -16,7 +16,7 @@ pip install --upgrade neuralnet-pytorch
 To install the Git version
 
 ```
-pip instal git+git://github.com/justanhduc/neuralnet-pytorch.git@master
+pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
 ```
 
 
