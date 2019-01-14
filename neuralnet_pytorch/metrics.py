@@ -2,34 +2,21 @@ import torch as T
 import torch.nn.functional as F
 import numpy as np
 
-
-def HuberLoss(x, y, thres=1.):
-    if y.ndimension() != x.ndimension():
-        raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
-    e = T.abs(x - y)
-    larger_than_equal_to = .5 * thres ** 2 + thres * (e - thres)
-    less_than = .5 * e**2
-    mask = e >= thres
-    mask = mask.type(e.data.type())
-    return T.mean(mask * larger_than_equal_to + (1. - mask) * less_than)
+__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr']
 
 
-def _flip_tensor(filters):
-    flipped = filters.numpy().copy()
-
-    for i in range(len(filters.size())):
-        flipped = np.flip(flipped, i) #Reverse given tensor on dimention i
-    return T.from_numpy(flipped.copy())
+def huber_loss(x, y, reduction='mean'):
+    return F.smooth_l1_loss(x, y, reduction)
 
 
-def FirstDerivativeError(x, y, p=2):
+def first_derivative_loss(x, y, p=2):
     if x.ndimension() != 4 and y.ndimension() != 4:
         raise TypeError('y and y_pred should have four dimensions')
-    kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32'))
-    kern_x = _flip_tensor(kern_x.expand(y.shape[1], y.shape[1], 3, 3))
+    kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32')).requires_grad_(False)
+    kern_x = T.flip(kern_x.expand(y.shape[1], y.shape[1], 3, 3), (0, 1))
 
-    kern_y = T.from_numpy(np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype='float32'))
-    kern_y = _flip_tensor(kern_y.expand(y.shape[1], y.shape[1], 3, 3))
+    kern_y = T.from_numpy(np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype='float32')).requires_grad_(False)
+    kern_y = T.flip(kern_y.expand(y.shape[1], y.shape[1], 3, 3), (0, 1))
 
     if T.cuda.is_available():
         kern_x = kern_x.cuda()
@@ -42,13 +29,28 @@ def FirstDerivativeError(x, y, p=2):
     y_grad_x = F.conv2d(y, kern_x, padding=1)
     y_grad_y = F.conv2d(y, kern_y, padding=1)
     y_grad = T.sqrt(y_grad_x ** 2 + y_grad_y ** 2 + 1e-10)
-    return NormError(x_grad, y_grad, p)
+    return lp_loss(x_grad, y_grad, p)
 
 
-def NormError(x, y, p=2):
+def lp_loss(x, y, p=2, reduction='mean'):
+    """
+    Calculates p-norm of (x - y)
+
+    :param x: a Torch.tensor
+    :param y: a Torch.tensor of the same shape as x
+    :param p: order of the norm
+    :param reduction: 'mean' or 'sum'
+    :return: the p-norm of (x - y)
+    """
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
-    return T.mean(T.abs(x - y) ** p)
+
+    if p == 1:
+        return F.l1_loss(x, y, reduction=reduction)
+    elif p == 2:
+        return F.mse_loss(x, y, reduction=reduction)
+    else:
+        return T.mean(T.abs(x - y) ** p)
 
 
 def _fspecial_gauss(size, sigma):
@@ -59,7 +61,7 @@ def _fspecial_gauss(size, sigma):
     return g / np.sum(g)
 
 
-def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
+def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
     """Return the Structural Similarity Map between `img1` and `img2`.
     This function attempts to match the functionality of ssim_index_new.m by
     Zhou Wang: http://www.cns.nyu.edu/~lcv/ssim/msssim.zip
@@ -94,7 +96,8 @@ def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     sigma = (size * filter_sigma / filter_size) if filter_size else 1.
 
     if filter_size:
-        window = _flip_tensor(T.tensor(_fspecial_gauss(size, sigma))).view(1, 1, size, size).type(T.float32)
+        window = T.flip(T.tensor(_fspecial_gauss(size, sigma)), (0, 1)).view(1, 1, size, size).type(
+            T.float32).requires_grad_(False)
         if T.cuda.is_available():
             window = window.cuda()
         mu1 = F.conv2d(img1, window)
@@ -126,6 +129,6 @@ def SSIM(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     return output
 
 
-def PSNR(x, y):
+def psnr(x, y):
     """PSNR for [0,1] images"""
     return -10 * T.log(T.mean((y - x) ** 2)) / np.log(10.)

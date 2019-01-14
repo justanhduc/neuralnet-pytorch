@@ -1,9 +1,10 @@
 from __future__ import print_function
-from . import layers
-from . import metrics
-from . import optimization
+
+from ._version import author as __author__
+from ._version import version as __version__
 from . import utils
-from .utils import ConfigParser
-from .training import Training
-from .optimization import Optimizer
-from .model import Model
+from .layers import *
+from .metrics import *
+from .resizing import *
+from .normalization import *
+from .optimizer import *

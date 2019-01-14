@@ -5,11 +5,11 @@ import os
 AUTHOR = 'DUC NGUYEN'
 MAJOR = 0
 MINOR = 0
-MICRO = '2a'
+MICRO = '3'
 VERSION = '%d.%d.%s' % (MAJOR, MINOR, MICRO)
 
 
-def write_version_py(filename='neuralnet_pytorch/version.py'):
+def write_version_py(filename='neuralnet_pytorch/_version.py'):
     cnt = """
 #THIS FILE IS GENRERATED FROM SETUP.PY
 
