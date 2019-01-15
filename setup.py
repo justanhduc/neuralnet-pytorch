@@ -1,7 +1,6 @@
 from setuptools import setup, find_packages
 import os
 
-
 AUTHOR = 'DUC NGUYEN'
 MAJOR = 0
 MINOR = 0
@@ -50,7 +49,7 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['examples']),
-        install_requires=['theano', 'matplotlib', 'scipy', 'numpy'],
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',

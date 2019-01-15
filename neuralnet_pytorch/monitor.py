@@ -109,7 +109,7 @@ class Monitor:
         assert isinstance(network, (
         nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(type(network))
         with open('%s/network.txt' % self.current_folder, 'w') as outfile:
-            outfile.write("\n".join(str(x) for x in network))
+            outfile.write(network)
 
     def __enter__(self):
         pass
