@@ -106,7 +106,7 @@ class Cat(Module):
         return tuple(shape)
 
     def __repr__(self):
-        return 'Cat({}, dim={})'.format(self.input_shape, self.dim)
+        return 'Cat({}, dim={}, output_shape={})'.format(self.input_shape, self.dim, self.output_shape)
 
 
 class Reshape(Module):
@@ -134,6 +134,9 @@ class Reshape(Module):
         else:
             return tuple(self.new_shape)
 
+    def __repr__(self):
+        return 'Reshape({}, new_shape={}, output_shape={})'.format(self.input_shape, self.new_shape, self.output_shape)
+
 
 class Flatten(Module):
     def __init__(self, input_shape, ndim=1):
@@ -155,6 +158,9 @@ class Flatten(Module):
         shape = self._calculate_new_shape(shape)
         return shape
 
+    def __repr__(self):
+        return 'Flatten({}, ndim={}, output_shape={})'.format(self.input_shape, self.ndim, self.output_shape)
+
 
 class DimShuffle(Module):
     def __init__(self, input_shape, pattern):
@@ -168,3 +174,6 @@ class DimShuffle(Module):
     @utils.validate
     def output_shape(self):
         return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])
+
+    def __repr__(self):
+        return 'DimShuffle({}, pattern={}, output_shape={})'.format(self.input_shape, self.pattern, self.output_shape)

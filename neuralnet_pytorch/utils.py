@@ -39,8 +39,8 @@ class ConfigParser(object):
 
 
 def lrelu(x, **kwargs):
-    alpha = kwargs.get('alpha', 0.1)
-    return F.leaky_relu(x, alpha, True)
+    alpha = kwargs.get('alpha', 0.2)
+    return F.leaky_relu(x, alpha, False)
 
 
 def rgb2gray(img):
@@ -113,5 +113,5 @@ def shape_padright(x, n_ones=1):
     return dimshuffle(x, pattern)
 
 
-function = {'relu': lambda x, **kwargs: F.relu(x, True), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
+function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
             'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: F.tanh(x)}

@@ -27,6 +27,8 @@ from neuralnet_pytorch import utils
 
 _TRACKS = collections.OrderedDict()
 
+__all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables']
+
 
 def track(name, x):
     assert isinstance(name, str), 'name must be a string, got %s' % type(name)
@@ -104,6 +106,9 @@ class Monitor:
 
         self.kwargs = kwargs
         print('Result folder: %s' % self.current_folder)
+
+    def __del__(self):
+        self.flush()
 
     def dump_model(self, network):
         assert isinstance(network, (
@@ -253,7 +258,8 @@ class Monitor:
 
         # dump recorded objects
         for k, v in self.__dump_files_tmp.items():
-            self._dump(v[0], k, v[1])
+            self._dump(v[0], k.replace(' ', '_'), v[1])
+        self.__dump_files_tmp.clear()
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({**self.__num_since_beginning, **self.__hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
@@ -261,8 +267,8 @@ class Monitor:
         print("Elapsed time {:.2f}min \t Iteration {}\t{}".format((time.time() - self.__timer) / 60., self.__iter,
                                                                   "\t".join(prints)))
 
-    def dump(self, obj, file, keep=-1):
-        self.__dump_files_tmp[file] = (obj, keep)
+    def dump(self, name, obj, keep=-1):
+        self.__dump_files_tmp[name] = (obj, keep)
 
     def _dump(self, obj, file, keep=-1):
         assert isinstance(keep, int), 'keep must be an int, got %s' % type(keep)

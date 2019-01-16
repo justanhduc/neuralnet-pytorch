@@ -4,7 +4,7 @@ import numpy as np
 
 from neuralnet_pytorch import utils
 
-__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr']
+__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss']
 
 
 def huber_loss(x, y, reduction='mean'):
@@ -20,7 +20,7 @@ def first_derivative_loss(x, y, p=2):
     kern_y = T.from_numpy(np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype='float32')).requires_grad_(False)
     kern_y = T.flip(kern_y.expand(y.shape[1], y.shape[1], 3, 3), (0, 1))
 
-    if T.cuda.is_available():
+    if utils.cuda_available:
         kern_x = kern_x.cuda()
         kern_y = kern_y.cuda()
 
@@ -56,16 +56,25 @@ def lp_loss(x, y, p=2, reduction='mean'):
 
 
 def chamfer_loss(xyz1, xyz2):
+    """
+    Adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
+
+    :param xyz1: a point cloud of shape (b, n1, 3)
+    :param xyz2: a point cloud of shape (b, n2, 3)
+    :return: the Chamfer distance between the two point clouds
+    """
     def batch_pairwise_dist(x, y):
         bs, num_points_x, points_dim = x.size()
         _, num_points_y, _ = y.size()
         xx = T.bmm(x, x.transpose(2, 1))
         yy = T.bmm(y, y.transpose(2, 1))
         zz = T.bmm(x, y.transpose(2, 1))
+
         if utils.cuda_available:
             dtype = T.cuda.LongTensor
         else:
             dtype = T.LongTensor
+
         diag_ind_x = T.arange(0, num_points_x).type(dtype)
         diag_ind_y = T.arange(0, num_points_y).type(dtype)
         # brk()
@@ -127,8 +136,9 @@ def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     if filter_size:
         window = T.flip(T.tensor(_fspecial_gauss(size, sigma)), (0, 1)).view(1, 1, size, size).type(
             T.float32).requires_grad_(False)
-        if T.cuda.is_available():
+        if utils.cuda_available:
             window = window.cuda()
+
         mu1 = F.conv2d(img1, window)
         mu2 = F.conv2d(img2, window)
         sigma11 = F.conv2d(img1 * img1, window)

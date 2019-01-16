@@ -9,3 +9,4 @@ from .metrics import *
 from .resizing import *
 from .normalization import *
 from .optimizer import *
+from .monitor import *

@@ -18,6 +18,7 @@ class BatchNorm1d(nn.BatchNorm1d, Layer):
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
+            self.weight.requires_grad_(False)
 
     def forward(self, input):
         input = self.activation(super().forward(input), **self.kwargs)

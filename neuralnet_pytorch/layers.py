@@ -182,12 +182,12 @@ class Lambda(Module):
             return tuple(output_shape)
 
     def __repr__(self):
-        return 'Lambda({})'.format(self.input_shape)
+        return 'Lambda({}, output_shape={})'.format(self.input_shape, self.output_shape)
 
 
 class Conv2d(nn.Conv2d, Layer):
-    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, bias=True,
-                 init=None, activation=None, groups=1, **kwargs):
+    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
+                 bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
         assert isinstance(input_shape, list) or isinstance(input_shape,
                                                            tuple), 'input_shape must be list or tuple, got %s' % type(
             input_shape)
@@ -203,7 +203,8 @@ class Conv2d(nn.Conv2d, Layer):
         self.no_bias = bias
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
-        self.init = init
+        self.weights_init = weights_init
+        self.bias_init = bias_init
         self.border_mode = padding
         stride = tuple(stride) if isinstance(stride, (tuple, list)) else (stride, stride)
         dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
@@ -226,8 +227,11 @@ class Conv2d(nn.Conv2d, Layer):
         super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, padding, dilation, bias=bias,
                          groups=groups)
 
-        if init:
-            self.init(self.weight)
+        if weights_init:
+            self.weights_init(self.weight)
+
+        if bias and bias_init:
+            self.bias_init(self.bias)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -251,23 +255,31 @@ class Conv2d(nn.Conv2d, Layer):
 
     def reset_parameters(self):
         super().reset_parameters()
-        if self.init:
-            self.init(self.weight)
+        if self.weights_init:
+            self.weights_init(self.weight)
+
+        if self.bias and self.bias_init:
+            self.bias_init(self.bias)
 
 
 class FC(nn.Linear, Layer):
-    def __init__(self, input_shape, out_features, init=None, bias=True, activation=None, **kwargs):
+    def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
+                 **kwargs):
         assert None not in input_shape[1:], 'Shape of input must be known for FC layer'
         self.input_shape = input_shape
-        self.init = init
+        self.weights_init = weights_init
+        self.bias_init = bias_init
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
         self.kwargs = kwargs
 
         super().__init__(int(np.prod(self.input_shape[1:])), out_features, bias)
 
-        if init:
-            self.init(self.weight)
+        if weights_init:
+            self.weights_init(self.weight)
+
+        if bias and bias_init:
+            self.bias_init(self.bias)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -283,8 +295,11 @@ class FC(nn.Linear, Layer):
 
     def reset_parameters(self):
         super().reset_parameters()
-        if self.init:
-            self.init(self.weight)
+        if self.weights_init:
+            self.weights_init(self.weight)
+
+        if self.bias and self.bias_init:
+            self.bias_init(self.bias)
 
 
 class Activation(Module):
@@ -305,8 +320,8 @@ class Activation(Module):
 
 
 class ConvNormAct(Sequential):
-    def __init__(self, input_shape, out_channels, kernel_size, init=None, bias=True, padding='half', stride=1,
-                 dilation=1, activation='relu', groups=1, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, input_shape, out_channels, kernel_size, weights_init=None, bias=True, bias_init=None,
+                 padding='half', stride=1, dilation=1, activation='relu', groups=1, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape)
         from neuralnet_pytorch.normalization import BatchNorm2d
@@ -318,8 +333,9 @@ class ConvNormAct(Sequential):
         self.dilation = dilation
         self.activation = activation
         self.norm_method = norm_method
-        self.conv = Conv2d(input_shape, out_channels, kernel_size, init=init, bias=bias, padding=padding,
-                           stride=stride, dilation=dilation, activation=None, groups=groups, **kwargs)
+        self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
+                           bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
+                           groups=groups, **kwargs)
         if norm_method == 'bn':
             self.norm = BatchNorm2d(self.conv.output_shape, eps, momentum, affine, track_running_stats,
                                     no_scale=no_scale, activation=self.activation, **kwargs)
@@ -335,7 +351,7 @@ class ConvNormAct(Sequential):
         return self.norm.output_shape
 
     def __repr__(self):
-        string = 'ConvNormAct({}, {}, {}, padding={}, stride={}, activation={})'.format(self.input_shape[0],
+        string = 'ConvNormAct({}, {}, {}, padding={}, stride={}, activation={})'.format(self.input_shape,
                                                                                         self.out_channels,
                                                                                         self.kernel_size, self.padding,
                                                                                         self.stride, self.activation)
@@ -346,7 +362,7 @@ class ResNetBasicBlock(Sequential):
     expansion = 1
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, init=None, norm_method='bn', **kwargs):
+                 block=None, weights_init=None, bias_init=None, norm_method='bn', **kwargs):
         super().__init__(input_shape)
         self.input_shape = input_shape
         self.out_channels = out_channels
@@ -354,7 +370,8 @@ class ResNetBasicBlock(Sequential):
         self.stride = stride
         self.activation = utils.function[activation]
         self.groups = groups
-        self.init = init
+        self.weights_init = weights_init
+        self.bias_init = bias_init
         self.norm_method = norm_method
         self.kwargs = kwargs
 
@@ -364,7 +381,7 @@ class ResNetBasicBlock(Sequential):
                 self.downsample = downsample
             else:
                 self.downsample = ConvNormAct(input_shape, out_channels * self.expansion, 1, stride=stride, bias=False,
-                                              init=init, activation='linear')
+                                              weights_init=weights_init, bias_init=bias_init, activation='linear')
             self.add_module('downsample', self.downsample)
         else:
             if downsample:
@@ -381,17 +398,17 @@ class ResNetBasicBlock(Sequential):
         if self.expansion != 1:
             block.add_module('pre',
                              ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
-                                         init=self.init, groups=self.groups))
+                                         weights_init=self.weights_init, bias_init=self.bias_init, groups=self.groups))
         block.add_module('conv_norm_act_1',
                          ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
-                                     init=self.init,
+                                     weights_init=self.weights_init, bias_init=self.bias_init,
                                      stride=self.stride, activation=self.activation, groups=self.groups,
                                      norm_method=self.norm_method, **self.kwargs))
         block.add_module('conv_norm_act_2',
                          ConvNormAct(block.output_shape, self.out_channels * self.expansion,
                                      1 if self.expansion != 1 else self.kernel_size, bias=False, stride=1,
-                                     activation=None, groups=self.groups, init=self.init, norm_method=self.norm_method,
-                                     **self.kwargs))
+                                     activation=None, groups=self.groups, weights_init=self.weights_init,
+                                     norm_method=self.norm_method, bias_init=self.bias_init, **self.kwargs))
         return block
 
     def forward(self, input):
@@ -406,7 +423,7 @@ class ResNetBasicBlock(Sequential):
         return self.block.output_shape
 
     def __repr__(self):
-        string = 'ResNetBasicBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape[0],
+        string = 'ResNetBasicBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape,
                                                                                  self.out_channels, self.kernel_size,
                                                                                  self.stride, self.activation)
         return string
@@ -416,12 +433,12 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
     expansion = 4
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, init=None, norm_method='bn', **kwargs):
+                 block=None, weights_init=None, bias_init=None, norm_method='bn', **kwargs):
         super().__init__(input_shape, out_channels, kernel_size, stride, activation, downsample, groups, block=block,
-                         init=init, norm_method=norm_method, **kwargs)
+                         weights_init=weights_init, bias_init=bias_init, norm_method=norm_method, **kwargs)
 
     def __repr__(self):
-        string = 'ResNetBottleNeckBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape[0],
+        string = 'ResNetBottleNeckBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape,
                                                                                       self.out_channels,
                                                                                       self.kernel_size, self.stride,
                                                                                       self.activation)
@@ -430,12 +447,13 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
 
 class ConvTranspose2d(nn.ConvTranspose2d, Layer):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
-                 dilation=1, init=None, activation='linear', groups=1, **kwargs):
+                 dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple. Received %s.' % type(
             input_shape)
         super().__init__()
         self.input_shape = tuple(input_shape)
-        self.init = init
+        self.weights_init = weights_init
+        self.bias_init = bias_init
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
         stride = tuple(stride) if isinstance(stride, (tuple, list)) else (stride, stride)
@@ -458,8 +476,11 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
                                             output_padding, groups, bias, dilation)
         self.regularizable += tuple([self.bias])
 
-        if init:
-            init(self.weight)
+        if weights_init:
+            weights_init(self.weight)
+
+        if bias and bias_init:
+            bias_init(self.bias)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -479,10 +500,18 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
             np.mod(shape[2] + 2 * self.padding[1] - self.kernel_size[1], self.stride[1]) - 2 * self.padding[1]
         return self.input_shape[0], self.filter_shape[1], h, w
 
+    def reset_parameters(self):
+        super().reset_parameters()
+        if self.weights_init:
+            self.weights_init(self.weight)
+
+        if self.bias and self.bias_init:
+            self.bias_init(self.bias)
+
 
 class StackingConv(Sequential):
     def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=1,
-                 bias=True, init=None, norm_method=None, activation='relu', groups=1, **kwargs):
+                 bias=True, weights_init=None, bias_init=None, norm_method=None, activation='relu', groups=1, **kwargs):
         assert num_layers > 1, 'num_layers must be greater than 1, got %d' % num_layers
         super(StackingConv, self).__init__(input_shape)
         self.num_filters = out_channels
@@ -496,15 +525,15 @@ class StackingConv(Sequential):
         shape = tuple(input_shape)
         conv_layer = partial(ConvNormAct, norm_method=norm_method) if norm_method else Conv2d
         for num in range(num_layers - 1):
-            layer = conv_layer(input_shape=shape, out_channels=out_channels, kernel_size=kernel_size, init=init,
-                               stride=1, padding=padding, dilation=dilation, activation=activation, groups=groups,
-                               bias=bias, **kwargs)
+            layer = conv_layer(input_shape=shape, out_channels=out_channels, kernel_size=kernel_size,
+                               weights_init=weights_init, bias_init=bias_init, stride=1, padding=padding,
+                               dilation=dilation, activation=activation, groups=groups, bias=bias, **kwargs)
             self.add_module('stacking_conv_%d' % (num + 1), layer)
             shape = layer.output_shape
         self.add_module('stacking_conv_%d' % num_layers,
                         conv_layer(input_shape=shape, out_channels=out_channels, bias=bias, groups=groups,
-                                   kernel_size=kernel_size, init=init, stride=stride, padding=padding,
-                                   dilation=dilation, activation=activation, **kwargs))
+                                   kernel_size=kernel_size, weights_init=weights_init, stride=stride, padding=padding,
+                                   dilation=dilation, activation=activation, bias_init=bias_init, **kwargs))
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -515,7 +544,7 @@ class StackingConv(Sequential):
         return self[self.num_layers - 1].output_shape
 
     def __repr__(self):
-        string = 'StackingConv({}, {}, {}, num_layers={}, stride={}, activation={})'.format(self.input_shape[0],
+        string = 'StackingConv({}, {}, {}, num_layers={}, stride={}, activation={})'.format(self.input_shape,
                                                                                             self.num_filters,
                                                                                             self.filter_size,
                                                                                             self.num_layers,
