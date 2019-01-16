@@ -10,10 +10,9 @@ import torch as T
 import torch.nn as nn
 
 from neuralnet_pytorch import utils
+from neuralnet_pytorch.utils import cuda_available
 
-cuda_available = T.cuda.is_available()
-
-__all__ = ['cuda_available', 'Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
+__all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
            'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation', 'Sequential', 'Layer', 'Lambda',
            'Module']
 

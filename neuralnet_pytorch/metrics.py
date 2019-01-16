@@ -2,6 +2,8 @@ import torch as T
 import torch.nn.functional as F
 import numpy as np
 
+from neuralnet_pytorch import utils
+
 __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr']
 
 
@@ -51,6 +53,33 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return F.mse_loss(x, y, reduction=reduction)
     else:
         return T.mean(T.abs(x - y) ** p)
+
+
+def chamfer_loss(xyz1, xyz2):
+    def batch_pairwise_dist(x, y):
+        bs, num_points_x, points_dim = x.size()
+        _, num_points_y, _ = y.size()
+        xx = T.bmm(x, x.transpose(2, 1))
+        yy = T.bmm(y, y.transpose(2, 1))
+        zz = T.bmm(x, y.transpose(2, 1))
+        if utils.cuda_available:
+            dtype = T.cuda.LongTensor
+        else:
+            dtype = T.LongTensor
+        diag_ind_x = T.arange(0, num_points_x).type(dtype)
+        diag_ind_y = T.arange(0, num_points_y).type(dtype)
+        # brk()
+        rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
+        ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
+        P = (rx.transpose(2, 1) + ry - 2 * zz)
+        return P
+
+    P = batch_pairwise_dist(xyz1, xyz2)
+    mins, _ = T.min(P, 1)
+    loss_1 = T.sum(mins)
+    mins, _ = T.min(P, 2)
+    loss_2 = T.sum(mins)
+    return loss_1 + loss_2
 
 
 def _fspecial_gauss(size, sigma):

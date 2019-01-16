@@ -5,6 +5,10 @@ import json
 import yaml
 import numpy as np
 
+cuda_available = T.cuda.is_available()
+
+__all__ = ['cuda_available']
+
 
 def validate(func):
     """make sure output shape is a list of ints"""

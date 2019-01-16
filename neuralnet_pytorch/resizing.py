@@ -136,9 +136,9 @@ class Reshape(Module):
 
 
 class Flatten(Module):
-    def __init__(self, input_shape, dim=1):
+    def __init__(self, input_shape, ndim=1):
         super().__init__(input_shape)
-        self.dim = dim
+        self.ndim = ndim
 
     def forward(self, input):
         shape = list(input.shape)
@@ -146,7 +146,7 @@ class Flatten(Module):
         return input.view(*shape)
 
     def _calculate_new_shape(self, shape):
-        return tuple(shape[:self.dim-1]) + tuple([np.prod(shape[self.dim-1:])])
+        return tuple(shape[:self.ndim - 1]) + tuple([np.prod(shape[self.ndim - 1:])])
 
     @property
     @utils.validate
