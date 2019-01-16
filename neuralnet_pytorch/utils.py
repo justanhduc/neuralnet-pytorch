@@ -88,5 +88,26 @@ def bulk_to_cuda(xs):
     return tuple([to_cuda(x) for x in xs])
 
 
+def dimshuffle(x, pattern):
+    assert isinstance(pattern, (list, tuple)), 'pattern must be a list/tuple'
+    no_expand_pattern = [x for x in pattern if x != 'x']
+    y = x.permute(*no_expand_pattern)
+    shape = list(y.shape)
+    for idx, e in enumerate(pattern):
+        if e == 'x':
+            shape.insert(idx, 1)
+    return y.view(*shape)
+
+
+def shape_padleft(x, n_ones=1):
+    pattern = ('x',) * n_ones + tuple(range(x.ndimension()))
+    return dimshuffle(x, pattern)
+
+
+def shape_padright(x, n_ones=1):
+    pattern = tuple(range(x.ndimension())) + ('x',) * n_ones
+    return dimshuffle(x, pattern)
+
+
 function = {'relu': lambda x, **kwargs: F.relu(x, True), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
             'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: F.tanh(x)}

@@ -4,6 +4,7 @@ from torch import testing
 from torchvision.models import resnet
 
 import neuralnet_pytorch as nnt
+from neuralnet_pytorch import cuda_available
 
 
 def assert_list_close(x, y):
@@ -20,7 +21,7 @@ def sanity_check(module1, module2, shape=(64, 3, 32, 32)):
         params = nnt.utils.batch_get_value(module2.state_dict().values())
         nnt.utils.batch_set_value(module1.state_dict().values(), params)
 
-    if nnt.cuda_available:
+    if cuda_available:
         input = input.cuda()
         module1 = module1.cuda()
         module2 = module2.cuda()
@@ -33,6 +34,211 @@ def sanity_check(module1, module2, shape=(64, 3, 32, 32)):
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return T.nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
+
+def test_shape_pad():
+    shape = (10, 10)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    padded = nnt.utils.shape_padleft(a)
+    expected = a.unsqueeze(0)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+    padded = nnt.utils.shape_padleft(a, 2)
+    expected = a.unsqueeze(0).unsqueeze(0)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+    padded = nnt.utils.shape_padleft(a, 5)
+    expected = a.unsqueeze(0).unsqueeze(0).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+    padded = nnt.utils.shape_padright(a)
+    expected = a.unsqueeze(-1)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+    padded = nnt.utils.shape_padright(a, 2)
+    expected = a.unsqueeze(-1).unsqueeze(-1)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+    padded = nnt.utils.shape_padright(a, 5)
+    expected = a.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    testing.assert_allclose(padded, expected)
+    testing.assert_allclose(padded.shape, expected.shape)
+
+
+def test_dimshuffle_layer():
+    shape = (64, 512)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    dimshuffle = nnt.DimShuffle(shape, (0, 1, 'x', 'x'))
+    expected = a.unsqueeze(2).unsqueeze(2)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+
+    dimshuffle = nnt.DimShuffle(shape, (1, 0, 'x', 'x'))
+    expected = a.permute(1, 0).unsqueeze(2).unsqueeze(2)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+
+    dimshuffle = nnt.DimShuffle(shape, (0, 'x', 1, 'x'))
+    expected = a.unsqueeze(2).permute(0, 2, 1).unsqueeze(3)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+
+    dimshuffle = nnt.DimShuffle(shape, (1, 'x', 'x', 0))
+    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(1)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+
+    dimshuffle = nnt.DimShuffle(shape, (1, 'x', 0, 'x', 'x'))
+    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(3).unsqueeze(3)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+
+
+def test_dimshuffle():
+    shape = (64, 512)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    dimshuffled = nnt.utils.dimshuffle(a, (0, 1, 'x', 'x'))
+    expected = a.unsqueeze(2).unsqueeze(2)
+    testing.assert_allclose(dimshuffled, expected)
+    testing.assert_allclose(dimshuffled.shape, expected.shape)
+
+    dimshuffled = nnt.utils.dimshuffle(a, (1, 0, 'x', 'x'))
+    expected = a.permute(1, 0).unsqueeze(2).unsqueeze(2)
+    testing.assert_allclose(dimshuffled, expected)
+    testing.assert_allclose(dimshuffled.shape, expected.shape)
+
+    dimshuffled = nnt.utils.dimshuffle(a, (0, 'x', 1, 'x'))
+    expected = a.unsqueeze(2).permute(0, 2, 1).unsqueeze(3)
+    testing.assert_allclose(dimshuffled, expected)
+    testing.assert_allclose(dimshuffled.shape, expected.shape)
+
+    dimshuffled = nnt.utils.dimshuffle(a, (1, 'x', 'x', 0))
+    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(1)
+    testing.assert_allclose(dimshuffled, expected)
+    testing.assert_allclose(dimshuffled.shape, expected.shape)
+
+    dimshuffled = nnt.utils.dimshuffle(a, (1, 'x', 0, 'x', 'x'))
+    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(3).unsqueeze(3)
+    testing.assert_allclose(dimshuffled, expected)
+    testing.assert_allclose(dimshuffled.shape, expected.shape)
+
+
+def test_flatten():
+    shape = (10, 4, 2, 3, 6)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    flatten = nnt.Flatten((None,) + shape[1:], 2)
+    expected = a.view(-1, np.prod(shape[1:]))
+    testing.assert_allclose(flatten(a), expected)
+    testing.assert_allclose((shape[0],) + flatten.output_shape[1:], expected.shape)
+
+    flatten = nnt.Flatten((None,) + shape[1:], 5)
+    expected = a.view(*shape)
+    testing.assert_allclose(flatten(a), expected)
+    testing.assert_allclose((shape[0],) + flatten.output_shape[1:], expected.shape)
+
+    flatten = nnt.Flatten(shape)
+    expected = a.view(-1)
+    testing.assert_allclose(flatten(a), expected)
+    testing.assert_allclose(flatten.output_shape, expected.shape)
+
+
+def test_reshape():
+    shape = (10, 3, 9, 9)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    newshape = (-1, 9, 9)
+    reshape = nnt.Reshape((None,) + shape[1:], newshape)
+    expected = T.reshape(a, newshape)
+    testing.assert_allclose(reshape(a), expected)
+    testing.assert_allclose(reshape.output_shape[1:], expected.shape[1:])
+
+    newshape = (10, -1, 9)
+    reshape = nnt.Reshape(shape, newshape)
+    expected = T.reshape(a, newshape)
+    testing.assert_allclose(reshape(a), expected)
+    testing.assert_allclose(reshape.output_shape, expected.shape)
+
+    newshape = (9, 9, -1)
+    reshape = nnt.Reshape(shape, newshape)
+    expected = T.reshape(a, newshape)
+    testing.assert_allclose(reshape(a), expected)
+    testing.assert_allclose(reshape.output_shape[1:], expected.shape[1:])
+
+
+def test_lambda():
+    shape = (3, 10, 5, 5)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    def foo1(x, y):
+        return x ** y
+
+    sqr = nnt.Lambda(shape, foo1, y=2.)
+    expected = a ** 2.
+    testing.assert_allclose(sqr(a), expected)
+    testing.assert_allclose(sqr.output_shape, expected.shape)
+
+    def foo2(x, fr, to):
+        return x[:, fr:to]
+
+    fr = 3
+    to = 7
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    slice = nnt.Lambda(shape, foo2, fr=fr, to=to)
+    expected = a[:, fr:to]
+    testing.assert_allclose(slice(a), expected)
+    testing.assert_allclose(slice.output_shape, expected.shape)
+
+
+def test_cat():
+    shape1 = (3, 2, 4, 4)
+    shape2 = (3, 5, 4, 4)
+    a = T.rand(*shape1)
+    b = T.rand(*shape2)
+    if cuda_available:
+        a = a.cuda()
+        b = b.cuda()
+
+    cat = nnt.Cat((shape1, shape2), 1)
+    expected = T.cat((a, b), 1)
+    testing.assert_allclose(cat(a, b), expected)
+    testing.assert_allclose(cat.output_shape, expected.shape)
+
+    shape1 = (3, 2, 4, 4)
+    shape2 = (3, 2, 9, 4)
+    a = T.rand(*shape1)
+    b = T.rand(*shape2)
+    if cuda_available:
+        a = a.cuda()
+        b = b.cuda()
+
+    cat = nnt.Cat((shape1, shape2), 2)
+    expected = T.cat((a, b), 2)
+    testing.assert_allclose(cat(a, b), expected)
+    testing.assert_allclose(cat.output_shape, expected.shape)
 
 
 def test_resnet_bottleneck_block():

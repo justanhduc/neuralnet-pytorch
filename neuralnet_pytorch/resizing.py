@@ -1,10 +1,11 @@
 import numpy as np
+import torch as T
 from torch import nn
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import Layer, cuda_available
+from neuralnet_pytorch.layers import Layer, Module, cuda_available
 
-__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d']
+__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle']
 
 
 class UpsamplingLayer(nn.Upsample, Layer):
@@ -85,3 +86,85 @@ class MaxPool2d(nn.MaxPool2d, Layer):
             if self.ceil_mode:
                 shape[3] += np.mod(shape[3], self.stride[1])
         return tuple(shape)
+
+
+class Cat(Module):
+    def __init__(self, input_shapes, dim):
+        super().__init__(input_shapes)
+        self.dim = dim
+
+    def forward(self, *input):
+        return T.cat(input, dim=self.dim)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]
+        depth = sum([shape_nan[i][self.dim] for i in range(len(self.input_shape))])
+        shape = list(shape_nan[0])
+        shape[self.dim] = depth
+        return tuple(shape)
+
+    def __repr__(self):
+        return 'Cat({}, dim={})'.format(self.input_shape, self.dim)
+
+
+class Reshape(Module):
+    def __init__(self, input_shape, shape):
+        super().__init__(input_shape)
+        self.new_shape = shape
+
+    def forward(self, input):
+        return T.reshape(input, self.new_shape)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if -1 in self.new_shape:
+            if self.new_shape[0] == -1 and len(self.new_shape) == len(self.input_shape):
+                output = list(self.new_shape)
+                output[0] = None
+                return tuple(output)
+            else:
+                shape = [np.nan if x is None else x for x in self.input_shape]
+                prod_shape = np.prod(shape)
+                prod_new_shape = np.prod(self.new_shape) * -1
+                output_shape = [x if x != -1 else prod_shape / prod_new_shape for x in self.new_shape]
+                return tuple(output_shape)
+        else:
+            return tuple(self.new_shape)
+
+
+class Flatten(Module):
+    def __init__(self, input_shape, dim=1):
+        super().__init__(input_shape)
+        self.dim = dim
+
+    def forward(self, input):
+        shape = list(input.shape)
+        shape = self._calculate_new_shape(shape)
+        return input.view(*shape)
+
+    def _calculate_new_shape(self, shape):
+        return tuple(shape[:self.dim-1]) + tuple([np.prod(shape[self.dim-1:])])
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        shape = [np.nan if x is None else x for x in self.input_shape]
+        shape = self._calculate_new_shape(shape)
+        return shape
+
+
+class DimShuffle(Module):
+    def __init__(self, input_shape, pattern):
+        super().__init__(input_shape)
+        self.pattern = pattern
+
+    def forward(self, input):
+        return utils.dimshuffle(input, self.pattern)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])

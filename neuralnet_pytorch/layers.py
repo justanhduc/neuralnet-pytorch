@@ -13,35 +13,54 @@ from neuralnet_pytorch import utils
 
 cuda_available = T.cuda.is_available()
 
-__all__ = ['cuda_available', 'Conv2d', 'ConvNormAct', 'ConvTrans2DLayer', 'StackingConv', 'ResNetBasicBlock',
-           'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation']
+__all__ = ['cuda_available', 'Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
+           'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation', 'Sequential', 'Layer', 'Lambda',
+           'Module']
 
 
 class NetMethod:
     @property
     @utils.validate
     def output_shape(self):
+        assert not hasattr(super(), 'output_shape')
+
         return tuple(self.input_shape)
 
     @property
     def params(self):
+        assert not hasattr(super(), 'params')
+
         return tuple(self.state_dict().values())
 
     @property
     def trainable(self):
+        assert not hasattr(super(), 'trainable')
+
         return tuple([p for p in self.parameters() if p.requires_grad])
 
     @property
     def regularizable(self):
-        return tuple([self.weight]) if hasattr(self, 'weight') else ()
+        assert not hasattr(super(), 'regularizable')
+
+        if hasattr(self, 'weight'):
+            return tuple([self.weight])
+        else:
+            r = []
+            for m in self.children():
+                r.extend(m.regularizable if hasattr(m, 'regularizable') else [])
+            return tuple(r)
 
     def save(self, param_file):
+        assert not hasattr(super(), 'save')
+
         params_np = utils.bulk_to_numpy(self.params)
         params_dict = OrderedDict(zip(list(self.state_dict().keys()), params_np))
         T.save(params_dict, param_file)
         print('Model weights dumped to %s' % param_file)
 
-    def load_params(self, param_file, eval=True):
+    def load(self, param_file, eval=True):
+        assert not hasattr(super(), 'load')
+
         params_dict = T.load(param_file)
         if cuda_available:
             params_cuda = utils.bulk_to_cuda(params_dict.values())
@@ -54,12 +73,19 @@ class NetMethod:
         print('Model weights loaded from %s' % param_file)
 
     def reset_parameters(self):
+        assert not hasattr(super(), 'reset_parameters')
         pass
 
 
 class Layer(NetMethod):
     def __init__(self):
         self.input_shape = None
+
+
+class Module(nn.Module, Layer, NetMethod):
+    def __init__(self, input_shape):
+        super().__init__()
+        self.input_shape = input_shape
 
 
 class Sequential(nn.Sequential, NetMethod):
@@ -88,18 +114,17 @@ class Sequential(nn.Sequential, NetMethod):
         return tuple(regularizable)
 
     def reset_parameters(self):
-        for m in self.modules():
+        for m in self.children():
             m.reset_parameters()
 
 
-class WrapperLayer(nn.Module, Layer):
+class WrapperLayer(Module):
     def __init__(self, layers, input_shape):
-        super(WrapperLayer, self).__init__()
+        super(WrapperLayer, self).__init__(input_shape)
         self.__wrapped_layer = layers
         self.__forward = layers.forward
         self.__train = layers.train
         self.__eval = layers.eval
-        self.input_shape = input_shape
         if cuda_available:
             self.cuda()
 
@@ -126,6 +151,39 @@ class WrapperLayer(nn.Module, Layer):
 
     def eval(self):
         self.__eval()
+
+
+class Lambda(Module):
+    def __init__(self, input_shape, func, output_shape=None, **kwargs):
+        assert callable(func), 'The provided function must be callable'
+
+        super().__init__(input_shape)
+        self.output_shape_tmp = output_shape
+        self.func = func
+        self.kwargs = kwargs
+
+    def forward(self, *input):
+        return self.func(*input, **self.kwargs)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if self.output_shape_tmp:
+            return self.output_shape_tmp
+        else:
+            none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
+            shape = [1 if s is None else s for s in self.input_shape]
+            dummy = T.zeros(*shape)
+            if cuda_available:
+                dummy.cuda()
+            dummy = self.forward(dummy)
+            output_shape = list(dummy.shape)
+            for k in none_indices:
+                output_shape[k] = None
+            return tuple(output_shape)
+
+    def __repr__(self):
+        return 'Lambda({})'.format(self.input_shape)
 
 
 class Conv2d(nn.Conv2d, Layer):
@@ -230,10 +288,9 @@ class FC(nn.Linear, Layer):
             self.init(self.weight)
 
 
-class Activation(nn.Module, Layer):
+class Activation(Module):
     def __init__(self, input_shape, activation='relu', **kwargs):
-        super().__init__()
-        self.input_shape = input_shape
+        super().__init__(input_shape)
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
         self.kwargs = kwargs
@@ -327,7 +384,8 @@ class ResNetBasicBlock(Sequential):
                              ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
                                          init=self.init, groups=self.groups))
         block.add_module('conv_norm_act_1',
-                         ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False, init=self.init,
+                         ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
+                                     init=self.init,
                                      stride=self.stride, activation=self.activation, groups=self.groups,
                                      norm_method=self.norm_method, **self.kwargs))
         block.add_module('conv_norm_act_2',
@@ -371,7 +429,7 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
         return string
 
 
-class ConvTrans2DLayer(nn.ConvTranspose2d, Layer):
+class ConvTranspose2d(nn.ConvTranspose2d, Layer):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
                  dilation=1, init=None, activation='linear', groups=1, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple. Received %s.' % type(
