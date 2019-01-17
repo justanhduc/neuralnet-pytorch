@@ -1,21 +1,62 @@
+import torch as T
 from torch import optim
 
-
-def adam(params, lr=1e-3, beta1=.9, beta2=.999, eps=1e-8, weight_decay=0., **kwargs):
-    closure = kwargs.pop('closure', None)
-    return optim.Adam(params, lr, (beta1, beta2), eps, weight_decay).step(closure)
+__all__ = ['NAdam']
 
 
-def amsgrad(params, lr=1e-3, beta1=.9, beta2=.999, eps=1e-8, weight_decay=0., **kwargs):
-    closure = kwargs.pop('closure', None)
-    return optim.Adam(params, lr, (beta1, beta2), eps, weight_decay, amsgrad=True).step(closure)
+class NAdam(optim.Adam):
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0,
+                 decay=lambda x, t: x * (1. - .5 * .96 ** (t / 250.))):
+        super().__init__(params, lr, betas, eps, weight_decay)
+        self.decay = decay
 
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            loss = closure()
 
-def sgd(params, lr, momentum=0., dampening=0., weight_decay=0., nesterov=False, **kwargs):
-    closure = kwargs.pop('closure', None)
-    return optim.SGD(params, lr, momentum, dampening, weight_decay, nesterov).step(closure)
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('NAdam does not support sparse gradients, please consider SparseAdam instead')
 
+                state = self.state[p]
 
-def rmsprop(params, lr, alpha, momentum, eps, weght_decay, centered, **kwargs):
-    closure = kwargs.pop('closure', None)
-    return optim.RMSprop(params, lr, alpha, eps, weght_decay, momentum, centered).step(closure)
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = T.zeros_like(p.data)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = T.zeros_like(p.data)
+                    # Beta1 accumulation
+                    state['beta1_cum'] = 1.
+
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                beta1, beta2 = group['betas']
+
+                state['step'] += 1
+
+                if group['weight_decay'] != 0:
+                    grad.add_(group['weight_decay'], p.data)
+
+                beta1_t = self.decay(beta1, state['step'])
+                beta1_tp1 = self.decay(beta1, state['step'] + 1.)
+                beta1_cum = state['beta1_cum'] * beta1_t
+
+                g_hat_t = grad / (1. - beta1_cum)
+                exp_avg.mul_(beta1).add_(1. - beta1, grad)
+                m_hat_t = exp_avg / (1. - beta1_cum * beta1_tp1)
+
+                exp_avg_sq.mul_(beta2).addcmul_(1. - beta2, grad, grad)
+                v_hat_t = exp_avg_sq / (1. - beta2 ** state['step'])
+                m_bar_t = (1. - beta1) * g_hat_t + beta1_tp1 * m_hat_t
+
+                denom = v_hat_t.sqrt().add_(group['eps'])
+                p.data.addcdiv_(-group['lr'], m_bar_t, denom)
+                state['beta1_cum'] = beta1_cum
+
+        return loss

@@ -107,6 +107,10 @@ class Monitor:
         self.kwargs = kwargs
         print('Result folder: %s' % self.current_folder)
 
+    @property
+    def iter(self):
+        return self.__iter
+
     def __del__(self):
         self.flush()
 
@@ -114,7 +118,7 @@ class Monitor:
         assert isinstance(network, (
         nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(type(network))
         with open('%s/network.txt' % self.current_folder, 'w') as outfile:
-            outfile.write(network)
+            outfile.write(str(network))
 
     def __enter__(self):
         pass

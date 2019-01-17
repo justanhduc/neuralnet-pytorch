@@ -55,14 +55,52 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return T.mean(T.abs(x - y) ** p)
 
 
-def chamfer_loss(xyz1, xyz2):
+def iou_loss(x, y):
     """
-    Adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
+    Adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/iou_loss.py
+
+    :param x: an image of size (b, c, h, w)
+    :param y: an image of the same shape as x
+    :return: the intersection over union score
+    """
+    def compute_intersection(preds, gts):
+        corner_preds_low, _ = T.min(preds, 1.)
+        corner_preds_high, _ = T.max(preds, 1.)
+
+        corner_gts_low, _ = T.min(gts, 1.)
+        corner_gts_high, _ = T.max(gts, 1.)
+
+        corner_low, _ = T.max(T.stack([corner_preds_low, corner_gts_low]), 0.)
+        corner_high, _ = T.min(T.stack([corner_preds_high, corner_gts_high]), 0.)
+
+        corner_preds_diff = corner_preds_high - corner_preds_low
+        corner_gts_diff = corner_gts_high - corner_gts_low
+
+        area_preds = T.prod(corner_preds_diff, 1.)
+        area_gts = T.prod(corner_gts_diff, 1.)
+        return corner_low, corner_high, area_preds, area_gts
+
+    corner_low, corner_high, area_preds, area_gts = compute_intersection(x, y)
+    corner_diff = corner_high - corner_low
+    intersection = T.prod(corner_diff, 1.)
+    union = area_gts + area_preds - intersection
+    iou = intersection / (union + 1e-8)
+    return iou
+
+
+def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
+    """
+    The Pytorch code is adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
+    The CUDA code is adapted from https://github.com/ThibaultGROUEIX/AtlasNet/tree/master/extension
 
     :param xyz1: a point cloud of shape (b, n1, 3)
     :param xyz2: a point cloud of shape (b, n2, 3)
+    :param reduce: 'mean' or 'sum'. Default is 'sum'
+    :param c_code: whether to use CUDA implementation. This version is much more memory-friendly and slightly faster
     :return: the Chamfer distance between the two point clouds
     """
+    assert reduce in ('mean', 'sum'), 'Unknown reduce method'
+
     def batch_pairwise_dist(x, y):
         bs, num_points_x, points_dim = x.size()
         _, num_points_y, _ = y.size()
@@ -83,12 +121,16 @@ def chamfer_loss(xyz1, xyz2):
         P = (rx.transpose(2, 1) + ry - 2 * zz)
         return P
 
-    P = batch_pairwise_dist(xyz1, xyz2)
-    mins, _ = T.min(P, 1)
-    loss_1 = T.sum(mins)
-    mins, _ = T.min(P, 2)
-    loss_2 = T.sum(mins)
-    return loss_1 + loss_2
+    if c_code:
+        from .extensions import chamfer_distance
+        dist1, dist2 = chamfer_distance(xyz1, xyz2)
+    else:
+        P = batch_pairwise_dist(xyz1, xyz2)
+        dist2, _ = T.min(P, 1)
+        dist1, _ = T.min(P, 2)
+    loss_2 = T.sum(dist2)
+    loss_1 = T.sum(dist1)
+    return (T.mean(loss_1) + T.mean(loss_2)) if reduce == 'mean' else (T.sum(loss_1) + T.sum(loss_2))
 
 
 def _fspecial_gauss(size, sigma):

@@ -1,6 +1,7 @@
 import torch as T
 import numpy as np
 from torch import testing
+from torch.nn import functional as F
 from torchvision.models import resnet
 
 import neuralnet_pytorch as nnt
@@ -34,6 +35,41 @@ def sanity_check(module1, module2, shape=(64, 3, 32, 32)):
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return T.nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
+
+def test_softmax():
+    shape = (64, 512)
+    out_features = 1000
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    sm = nnt.Softmax(shape, out_features)
+    expected = F.softmax(T.mm(a, sm.weight.t()) + sm.bias)
+    testing.assert_allclose(sm(a), expected)
+    testing.assert_allclose(sm.output_shape, expected.shape)
+
+    sm = nnt.Softmax(shape, out_features, dim=0)
+    expected = F.softmax(T.mm(a, sm.weight.t()) + sm.bias, dim=0)
+    testing.assert_allclose(sm(a), expected)
+    testing.assert_allclose(sm.output_shape, expected.shape)
+
+
+def test_global_avgpool2d():
+    shape = (4, 3, 256, 512)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    pool = nnt.GlobalAvgPool2D(shape)
+    expected = T.mean(a, (2, 3))
+    testing.assert_allclose(pool(a), expected)
+    testing.assert_allclose(pool.output_shape, expected.shape)
+
+    pool = nnt.GlobalAvgPool2D(shape, keepdim=True)
+    expected = T.mean(a, (2, 3)).unsqueeze(-1).unsqueeze(-1)
+    testing.assert_allclose(pool(a), expected)
+    testing.assert_allclose(pool.output_shape, expected.shape)
 
 
 def test_shape_pad():
@@ -78,6 +114,11 @@ def test_dimshuffle_layer():
     a = T.rand(*shape)
     if cuda_available:
         a = a.cuda()
+
+    dimshuffle = nnt.DimShuffle(shape, (1, 0))
+    expected = a.transpose(1, 0)
+    testing.assert_allclose(dimshuffle(a), expected)
+    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
 
     dimshuffle = nnt.DimShuffle(shape, (0, 1, 'x', 'x'))
     expected = a.unsqueeze(2).unsqueeze(2)
@@ -144,17 +185,22 @@ def test_flatten():
         a = a.cuda()
 
     flatten = nnt.Flatten((None,) + shape[1:], 2)
-    expected = a.view(-1, np.prod(shape[1:]))
+    expected = T.flatten(a, 2)
     testing.assert_allclose(flatten(a), expected)
     testing.assert_allclose((shape[0],) + flatten.output_shape[1:], expected.shape)
 
-    flatten = nnt.Flatten((None,) + shape[1:], 5)
-    expected = a.view(*shape)
+    flatten = nnt.Flatten((None,) + shape[1:], 4)
+    expected = T.flatten(a, 4)
     testing.assert_allclose(flatten(a), expected)
     testing.assert_allclose((shape[0],) + flatten.output_shape[1:], expected.shape)
 
     flatten = nnt.Flatten(shape)
-    expected = a.view(-1)
+    expected = T.flatten(a)
+    testing.assert_allclose(flatten(a), expected)
+    testing.assert_allclose(flatten.output_shape, expected.shape)
+
+    flatten = nnt.Flatten(shape, 1, 3)
+    expected = T.flatten(a, 1, 3)
     testing.assert_allclose(flatten(a), expected)
     testing.assert_allclose(flatten.output_shape, expected.shape)
 
@@ -340,6 +386,14 @@ def test_conv2d_layer():
     conv_pt = T.nn.Conv2d(shape[1], n_filters, filter_size, padding=filter_size >> 1)
     sanity_check(conv_nnt, conv_pt, shape)
 
+    shape = (None, 3, None, 224)
+    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride=2)
+    assert conv_nnt.output_shape == (None, 64, None, 112)
+
+    shape = (None, 3, None, None)
+    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride=2)
+    assert conv_nnt.output_shape == (None, 64, None, None)
+
 
 def test_fc_layer():
     shape = (64, 128)
@@ -356,3 +410,7 @@ def test_batchnorm2d_layer():
     bn_nnt = nnt.BatchNorm2d(shape)
     bn_pt = T.nn.BatchNorm2d(shape[1])
     sanity_check(bn_nnt, bn_pt, shape)
+
+    shape = (None, 3, None, None)
+    bn_nnt = nnt.BatchNorm2d(shape)
+    assert bn_nnt.output_shape == (None, 3, None, None)

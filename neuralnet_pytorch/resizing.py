@@ -1,11 +1,12 @@
 import numpy as np
 import torch as T
 from torch import nn
+from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.layers import Layer, Module, cuda_available
 
-__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle']
+__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D']
 
 
 class UpsamplingLayer(nn.Upsample, Layer):
@@ -25,7 +26,7 @@ class UpsamplingLayer(nn.Upsample, Layer):
     @utils.validate
     def output_shape(self):
         shape = [np.nan if s is None else s for s in self.input_shape]
-        return (shape[:2] + self.new_shape) if self.new_shape \
+        return (shape[:2] + self.new_shape) if self.size \
             else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
 
 
@@ -88,8 +89,27 @@ class MaxPool2d(nn.MaxPool2d, Layer):
         return tuple(shape)
 
 
+class GlobalAvgPool2D(Module):
+    def __init__(self, input_shape, keepdim=False):
+        super().__init__(input_shape)
+        self.keepdim = keepdim
+
+    def forward(self, input):
+        out = F.avg_pool2d(input, input.shape[2:], count_include_pad=True)
+        return out if self.keepdim else T.flatten(out, 1)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        output_shape = tuple(self.input_shape[:2])
+        return output_shape if not self.keepdim else output_shape + (1, 1)
+
+    def __str__(self):
+        return 'GlobalAvgPool2D({}, output_shape={})'.format(self.input_shape, self.output_shape)
+
+
 class Cat(Module):
-    def __init__(self, input_shapes, dim):
+    def __init__(self, input_shapes, dim=1):
         super().__init__(input_shapes)
         self.dim = dim
 
@@ -139,27 +159,26 @@ class Reshape(Module):
 
 
 class Flatten(Module):
-    def __init__(self, input_shape, ndim=1):
+    def __init__(self, input_shape, start_dim=0, end_dim=-1):
         super().__init__(input_shape)
-        self.ndim = ndim
+        self.start_dim = start_dim
+        self.end_dim = end_dim
 
     def forward(self, input):
-        shape = list(input.shape)
-        shape = self._calculate_new_shape(shape)
-        return input.view(*shape)
-
-    def _calculate_new_shape(self, shape):
-        return tuple(shape[:self.ndim - 1]) + tuple([np.prod(shape[self.ndim - 1:])])
+        return T.flatten(input, self.start_dim, self.end_dim)
 
     @property
     @utils.validate
     def output_shape(self):
         shape = [np.nan if x is None else x for x in self.input_shape]
-        shape = self._calculate_new_shape(shape)
+        start_dim = self.start_dim if self.start_dim != -1 else len(self.input_shape) - 1
+        end_dim = self.end_dim if self.end_dim != -1 else len(self.input_shape) - 1
+        shape = shape[:start_dim] + [np.prod(shape[start_dim:end_dim + 1])] + shape[end_dim + 1:]
         return shape
 
     def __repr__(self):
-        return 'Flatten({}, ndim={}, output_shape={})'.format(self.input_shape, self.ndim, self.output_shape)
+        return 'Flatten({}, start_dim={}, end_dim={}, output_shape={})'.format(self.input_shape, self.start_dim,
+                                                                               self.end_dim, self.output_shape)
 
 
 class DimShuffle(Module):

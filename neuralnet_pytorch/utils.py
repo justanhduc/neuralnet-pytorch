@@ -1,9 +1,10 @@
-import os
+import json
+
+import numpy as np
 import torch as T
 import torch.nn.functional as F
-import json
 import yaml
-import numpy as np
+from scipy.stats import truncnorm
 
 cuda_available = T.cuda.is_available()
 
@@ -36,6 +37,12 @@ class ConfigParser(object):
         except:
             raise NameError('Unable to open config file!!!')
         return data
+
+
+def truncated_normal(tensor, a=-1, b=1, mean=0., std=1.):
+    values = truncnorm.rvs(a, b, loc=mean, scale=std, size=list(tensor.shape))
+    with T.no_grad():
+        tensor.data.copy_(T.tensor(values))
 
 
 def lrelu(x, **kwargs):
@@ -114,4 +121,6 @@ def shape_padright(x, n_ones=1):
 
 
 function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
-            'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: F.tanh(x)}
+            'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: T.tanh(x),
+            'sigmoid': lambda x, **kwargs: T.sigmoid(x), 'elu': lambda x, **kwargs: F.elu(x, **kwargs),
+            'softmax': lambda x, **kwargs: F.softmax(x, **kwargs)}

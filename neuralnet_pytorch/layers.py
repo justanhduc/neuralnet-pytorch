@@ -14,7 +14,7 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
            'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation', 'Sequential', 'Layer', 'Lambda',
-           'Module']
+           'Module', 'Softmax']
 
 
 class NetMethod:
@@ -86,6 +86,30 @@ class Module(nn.Module, Layer, NetMethod):
         super().__init__()
         self.input_shape = input_shape
 
+    def add_module(self, name, module):
+        r"""Adds a child module to the current module. Modified to be able to add WrapperLayer.
+
+        The module can be accessed as an attribute using the given name.
+
+        Args:
+            name (string): name of the child module. The child module can be
+                accessed from this module using the given name
+            parameter (Module): child module to be added to the module.
+        """
+        if not isinstance(module, (nn.Module, WrapperLayer)) and module is not None:
+            raise TypeError("{} is not a Module/Wrapper subclass".format(
+                T.typename(module)))
+        elif not isinstance(name, T._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                T.typename(name)))
+        elif hasattr(self, name) and name not in self._modules:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
+        self._modules[name] = module
+
 
 class Sequential(nn.Sequential, NetMethod):
     def __init__(self, input_shape, *args):
@@ -116,40 +140,59 @@ class Sequential(nn.Sequential, NetMethod):
         for m in self.children():
             m.reset_parameters()
 
+    def add_module(self, name, module):
+        r"""Adds a child module to the current module. Modified to be able to add WrapperLayer.
 
-class WrapperLayer(Module):
-    def __init__(self, layers, input_shape):
-        super(WrapperLayer, self).__init__(input_shape)
-        self.__wrapped_layer = layers
-        self.__forward = layers.forward
-        self.__train = layers.train
-        self.__eval = layers.eval
+        The module can be accessed as an attribute using the given name.
+
+        Args:
+            name (string): name of the child module. The child module can be
+                accessed from this module using the given name
+            parameter (Module): child module to be added to the module.
+        """
+        if not isinstance(module, (nn.Module, WrapperLayer)) and module is not None:
+            raise TypeError("{} is not a Module/Wrapper subclass".format(
+                T.typename(module)))
+        elif not isinstance(name, T._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                T.typename(name)))
+        elif hasattr(self, name) and name not in self._modules:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
+        self._modules[name] = module
+
+
+class WrapperLayer(Layer):
+    def __init__(self, input_shape, layer, *args, **kwargs):
+        super(WrapperLayer, self).__init__()
+        self.input_shape = input_shape
+        device = kwargs.pop('device', None)
+        self.__wrapped_layer = layer(*args, **kwargs)
         if cuda_available:
-            self.cuda()
+            self.cuda(device)
 
     def __getattr__(self, item):
-        if item in self.__dict__:
-            return getattr(self, item)
-        return getattr(self.__wrapped_layer, item)
+        try:
+            return self.__wrapped_layer.__getattribute__(item)
+        except AttributeError:
+            return super(WrapperLayer, self).__getattribute__(item)
 
-    def forward(self, input):
-        input = self.__forward(input)
-        return input
+    def __call__(self, *args, **kwargs):
+        return self.__wrapped_layer(*args, **kwargs)
+
+    def __repr__(self):
+        return str(self.__wrapped_layer)
 
     @property
     @utils.validate
     def output_shape(self):
-        shape = [1] + list(self.input_shape) if isinstance(self.input_shape, (list, tuple)) else [1, self.input_shape]
+        shape = [1 if x is None else x for x in self.input_shape]
         dummy = T.zeros(*shape)
-        dummy = self.__forward(dummy)
-        shape = dummy.shape[1:] if dummy.ndimension() == 4 else dummy.shape[1]
-        return tuple(shape)
-
-    def train(self, mode=True):
-        self.__train(mode)
-
-    def eval(self):
-        self.__eval()
+        dummy = self(dummy)
+        return tuple(dummy.shape)
 
 
 class Lambda(Module):
@@ -227,12 +270,6 @@ class Conv2d(nn.Conv2d, Layer):
         super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, padding, dilation, bias=bias,
                          groups=groups)
 
-        if weights_init:
-            self.weights_init(self.weight)
-
-        if bias and bias_init:
-            self.bias_init(self.bias)
-
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
@@ -258,35 +295,30 @@ class Conv2d(nn.Conv2d, Layer):
         if self.weights_init:
             self.weights_init(self.weight)
 
-        if self.bias and self.bias_init:
+        if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
 
 
 class FC(nn.Linear, Layer):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
-                 **kwargs):
+                 keepdim=False, **kwargs):
         assert None not in input_shape[1:], 'Shape of input must be known for FC layer'
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
+        self.keepdim = keepdim
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
         self.kwargs = kwargs
 
         super().__init__(int(np.prod(self.input_shape[1:])), out_features, bias)
 
-        if weights_init:
-            self.weights_init(self.weight)
-
-        if bias and bias_init:
-            self.bias_init(self.bias)
-
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input):
-        input = self.activation(super().forward(input.view(-1, int(np.prod(self.input_shape[1])))), **self.kwargs)
-        return input
+        output = self.activation(super().forward(T.flatten(input, 1)), **self.kwargs)
+        return output.flatten() if self.out_features == 1 and not self.keepdim else output
 
     @property
     @utils.validate
@@ -298,8 +330,19 @@ class FC(nn.Linear, Layer):
         if self.weights_init:
             self.weights_init(self.weight)
 
-        if self.bias and self.bias_init:
+        if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
+
+
+class Softmax(FC):
+    def __init__(self, input_shape, out_features, dim=1, weights_init=None, bias_init=None, **kwargs):
+        self.dim = dim
+        super().__init__(input_shape, out_features,
+                         activation=lambda x, **kwargs: utils.function['softmax'](x, dim=dim, **kwargs),
+                         weights_init=weights_init, bias_init=bias_init, **kwargs)
+
+    def __repr__(self):
+        return 'Softmax({}, out_features={}, dim={})'.format(self.input_shape, self.out_features, self.dim)
 
 
 class Activation(Module):
@@ -476,12 +519,6 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
                                             output_padding, groups, bias, dilation)
         self.regularizable += tuple([self.bias])
 
-        if weights_init:
-            weights_init(self.weight)
-
-        if bias and bias_init:
-            bias_init(self.bias)
-
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
@@ -505,7 +542,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
         if self.weights_init:
             self.weights_init(self.weight)
 
-        if self.bias and self.bias_init:
+        if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
 
 
