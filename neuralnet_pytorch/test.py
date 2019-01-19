@@ -37,6 +37,70 @@ def conv1x1(in_planes, out_planes, stride=1):
     return T.nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 
+def test_ravel_index():
+    shape = (2, 4, 5, 3)
+    a = T.arange(np.prod(shape)).reshape(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    indices = [[1, 0, 1, 1, 0], [1, 3, 3, 2, 1], [1, 1, 4, 0, 3], [1, 2, 2, 2, 0]]
+    linear_indices = nnt.utils.ravel_index(indices, shape)
+    testing.assert_allclose(linear_indices.type_as(a), a[indices])
+
+
+def test_monitor():
+    shape = (64, 512)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+    n_loops = 5
+
+    mon = nnt.Monitor()
+    mon.dump('foo.pkl', a)
+    loaded = mon.load('foo.pkl')
+    testing.assert_allclose(a, loaded)
+    mon.reset()
+
+    for i in range(n_loops):
+        with mon:
+            mon.dump('foo.pkl', a + i, keep=3)
+    loaded = mon.load('foo.pkl', version=2)
+    testing.assert_allclose(a + 2., loaded)
+    mon.reset()
+
+    mon.dump('foo.txt', nnt.utils.to_numpy(a), 'txt')
+    loaded = mon.load('foo.txt', 'txt', dtype='float32')
+    if cuda_available:
+        loaded = nnt.utils.to_cuda(loaded)
+    testing.assert_allclose(a, loaded)
+    mon.reset()
+
+    for i in range(n_loops):
+        with mon:
+            mon.dump('foo.txt', nnt.utils.to_numpy(a + i), 'txt', keep=3)
+    loaded = mon.load('foo.txt', 'txt', version=2, dtype='float32')
+    if cuda_available:
+        loaded = nnt.utils.to_cuda(loaded)
+    testing.assert_allclose(a + 2., loaded)
+    mon.reset()
+
+    mon.dump('foo.pt', {'a': a}, 'torch')
+    loaded = mon.load('foo.pt', 'torch')['a']
+    testing.assert_allclose(a, loaded)
+    mon.reset()
+
+    for i in range(n_loops):
+        with mon:
+            mon.dump('foo.pt', {'a': a + i}, 'torch', keep=4)
+    loaded = mon.load('foo.pt', 'torch', version=3)['a']
+    testing.assert_allclose(a + 3, loaded)
+    mon.reset()
+
+    # cleanup
+    import shutil
+    shutil.rmtree('results', ignore_errors=True)
+
+
 def test_softmax():
     shape = (64, 512)
     out_features = 1000

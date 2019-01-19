@@ -55,39 +55,6 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return T.mean(T.abs(x - y) ** p)
 
 
-def iou_loss(x, y):
-    """
-    Adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/iou_loss.py
-
-    :param x: an image of size (b, c, h, w)
-    :param y: an image of the same shape as x
-    :return: the intersection over union score
-    """
-    def compute_intersection(preds, gts):
-        corner_preds_low, _ = T.min(preds, 1.)
-        corner_preds_high, _ = T.max(preds, 1.)
-
-        corner_gts_low, _ = T.min(gts, 1.)
-        corner_gts_high, _ = T.max(gts, 1.)
-
-        corner_low, _ = T.max(T.stack([corner_preds_low, corner_gts_low]), 0.)
-        corner_high, _ = T.min(T.stack([corner_preds_high, corner_gts_high]), 0.)
-
-        corner_preds_diff = corner_preds_high - corner_preds_low
-        corner_gts_diff = corner_gts_high - corner_gts_low
-
-        area_preds = T.prod(corner_preds_diff, 1.)
-        area_gts = T.prod(corner_gts_diff, 1.)
-        return corner_low, corner_high, area_preds, area_gts
-
-    corner_low, corner_high, area_preds, area_gts = compute_intersection(x, y)
-    corner_diff = corner_high - corner_low
-    intersection = T.prod(corner_diff, 1.)
-    union = area_gts + area_preds - intersection
-    iou = intersection / (union + 1e-8)
-    return iou
-
-
 def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
     """
     The Pytorch code is adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py

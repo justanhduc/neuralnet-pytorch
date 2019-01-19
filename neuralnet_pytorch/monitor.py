@@ -8,6 +8,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 import numpy as np
 import os
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 matplotlib.use('Agg')
@@ -62,22 +63,25 @@ def eval_tracked_variables():
 class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, checkpoint=0, use_visdom=False,
                  server='http://localhost', port=8097, disable_visdom_logging=True, print_freq=None, **kwargs):
-        self.__num_since_beginning = collections.defaultdict(lambda: {})
-        self.__num_since_last_flush = collections.defaultdict(lambda: {})
-        self.__img_since_last_flush = collections.defaultdict(lambda: {})
-        self.__hist_since_beginning = collections.defaultdict(lambda: {})
-        self.__hist_since_last_flush = collections.defaultdict(lambda: {})
-        self.__pointcloud_since_last_flush = collections.defaultdict(lambda: {})
-        self.__options = collections.defaultdict(lambda: {})
-        self.__ = collections.defaultdict(lambda: {})
-        self.__dump_files = collections.OrderedDict()
-        self.__dump_files_tmp = dict()
-        self.__iter = checkpoint
-        self.__timer = time.time()
+        self._num_since_beginning = collections.defaultdict(lambda: {})
+        self._num_since_last_flush = collections.defaultdict(lambda: {})
+        self._img_since_last_flush = collections.defaultdict(lambda: {})
+        self._hist_since_beginning = collections.defaultdict(lambda: {})
+        self._hist_since_last_flush = collections.defaultdict(lambda: {})
+        self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
+        self._options = collections.defaultdict(lambda: {})
+        self._dump_files = collections.OrderedDict()
+        self._iter = checkpoint
+        self._timer = time.time()
+        self._training_checkpoint = 'training.pt'
+        self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
+                           'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
+                           'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
         self.root = root
         self.name = model_name
         self.print_freq = print_freq
+        self.checkpoint = checkpoint
 
         if current_folder:
             self.current_folder = current_folder
@@ -109,14 +113,16 @@ class Monitor:
 
     @property
     def iter(self):
-        return self.__iter
+        return self._iter
 
     def __del__(self):
         self.flush()
+        plt.close()
 
     def dump_model(self, network):
         assert isinstance(network, (
-        nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(type(network))
+            nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
+            type(network))
         with open('%s/network.txt' % self.current_folder, 'w') as outfile:
             outfile.write(str(network))
 
@@ -124,47 +130,48 @@ class Monitor:
         pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.__iter % self.print_freq == 0:
-            self.flush()
+        if self.print_freq:
+            if self._iter % self.print_freq == 0:
+                self.flush()
         self.tick()
 
     def copy_file(self, file):
         copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
 
     def tick(self):
-        self.__iter += 1
+        self._iter += 1
 
     def plot(self, name, value):
-        self.__num_since_last_flush[name][self.__iter] = value
+        self._num_since_last_flush[name][self._iter] = value
 
     def scatter(self, name, value):
-        self.__pointcloud_since_last_flush[name][self.__iter] = value
+        self._pointcloud_since_last_flush[name][self._iter] = value
 
     def save_image(self, name, value, callback=lambda x: x):
-        self.__img_since_last_flush[name][self.__iter] = callback(value)
+        self._img_since_last_flush[name][self._iter] = callback(value)
 
     def hist(self, name, value, n_bins=20, last_only=False):
-        if self.__iter == 0:
-            self.__options[name]['last_only'] = last_only
-            self.__options[name]['n_bins'] = n_bins
-        self.__hist_since_last_flush[name][self.__iter] = value
+        if self._iter == 0:
+            self._options[name]['last_only'] = last_only
+            self._options[name]['n_bins'] = n_bins
+        self._hist_since_last_flush[name][self._iter] = value
 
     def flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
-        plt.close('all')
+        plt.close()
         use_visdom_for_plots = self.use_visdom if use_visdom_for_plots is None else use_visdom_for_plots
         use_visdom_for_image = self.use_visdom if use_visdom_for_image is None else use_visdom_for_image
 
         prints = []
         # plot statistics
-        for name, vals in list(self.__num_since_last_flush.items()):
-            self.__num_since_beginning[name].update(vals)
+        for name, vals in list(self._num_since_last_flush.items()):
+            self._num_since_beginning[name].update(vals)
 
-            x_vals = np.sort(list(self.__num_since_beginning[name].keys()))
+            x_vals = np.sort(list(self._num_since_beginning[name].keys()))
             fig = plt.figure()
             fig.clf()
             plt.xlabel('iteration')
             plt.ylabel(name)
-            y_vals = [self.__num_since_beginning[name][x] for x in x_vals]
+            y_vals = [self._num_since_beginning[name][x] for x in x_vals]
             max_, min_, med_ = np.max(y_vals), np.min(y_vals), np.median(y_vals)
             argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
             plt.title(
@@ -184,10 +191,10 @@ class Monitor:
             if use_visdom_for_plots:
                 self.vis.matplot(fig, win=name)
             plt.close(fig)
-        self.__num_since_last_flush.clear()
+        self._num_since_last_flush.clear()
 
         # save recorded images
-        for name, vals in list(self.__img_since_last_flush.items()):
+        for name, vals in list(self._img_since_last_flush.items()):
             for val in vals.values():
                 if val.dtype != 'uint8':
                     val = (255.99 * val).astype('uint8')
@@ -210,24 +217,24 @@ class Monitor:
                     imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'), val)
                 else:
                     raise NotImplementedError
-        self.__img_since_last_flush.clear()
+        self._img_since_last_flush.clear()
 
         # make histograms of recorded data
-        for name, vals in list(self.__hist_since_last_flush.items()):
-            n_bins = self.__options[name].get('n_bins')
-            last_only = self.__options[name].get('last_only')
+        for name, vals in list(self._hist_since_last_flush.items()):
+            n_bins = self._options[name].get('n_bins')
+            last_only = self._options[name].get('last_only')
 
             fig = plt.figure()
             fig.clf()
             if last_only:
-                k = max(list(self.__hist_since_last_flush[name].keys()))
+                k = max(list(self._hist_since_last_flush[name].keys()))
                 val = vals[k].flatten()
                 plt.hist(val, bins='auto')
             else:
-                self.__hist_since_beginning[name].update(vals)
+                self._hist_since_beginning[name].update(vals)
 
-                z_vals = np.sort(list(self.__hist_since_beginning[name].keys()))
-                vals = [self.__hist_since_beginning[name][i].flatten() for i in z_vals]
+                z_vals = np.sort(list(self._hist_since_beginning[name].keys()))
+                vals = [self._hist_since_beginning[name][i].flatten() for i in z_vals]
                 hists = [np.histogram(val, bins=n_bins) for val in vals]
                 y_vals = np.array([hists[i][0] for i in range(len(hists))])
                 x_vals = np.array([hists[i][1] for i in range(len(hists))])
@@ -240,10 +247,10 @@ class Monitor:
                 fig.colorbar(surf, shrink=0.5, aspect=5)
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_hist.jpg'))
             plt.close(fig)
-        self.__hist_since_last_flush.clear()
+        self._hist_since_last_flush.clear()
 
         # scatter pointcloud(s)
-        for name, vals in list(self.__pointcloud_since_last_flush.items()):
+        for name, vals in list(self._pointcloud_since_last_flush.items()):
             vals = list(vals.values())[-1]
             if len(vals.shape) == 2:
                 fig = plt.figure()
@@ -258,98 +265,133 @@ class Monitor:
                     ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
                     plt.savefig(os.path.join(self.current_folder, name + '_%d.jpg' % (ii + 1)))
                     plt.close()
-        self.__pointcloud_since_last_flush.clear()
-
-        # dump recorded objects
-        for k, v in self.__dump_files_tmp.items():
-            self._dump(v[0], k.replace(' ', '_'), v[1])
-        self.__dump_files_tmp.clear()
+        self._pointcloud_since_last_flush.clear()
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({**self.__num_since_beginning, **self.__hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({**self._num_since_beginning, **self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
 
-        print("Elapsed time {:.2f}min \t Iteration {}\t{}".format((time.time() - self.__timer) / 60., self.__iter,
+        print("Elapsed time {:.2f}min \t Iteration {}\t{}".format((time.time() - self._timer) / 60., self._iter,
                                                                   "\t".join(prints)))
 
-    def dump(self, name, obj, keep=-1):
-        self.__dump_files_tmp[name] = (obj, keep)
+    def _versioning(self, file, keep):
+        name, ext = os.path.splitext(file)
+        versioned_filename = os.path.normpath(name + '-%d' % self._iter + ext)
 
-    def _dump(self, obj, file, keep=-1):
+        if file not in self._dump_files.keys():
+            self._dump_files[file] = []
+
+        if versioned_filename not in self._dump_files[file]:
+            self._dump_files[file].append(versioned_filename)
+
+        if len(self._dump_files[file]) > keep:
+            oldest_file = self._dump_files[file][0]
+            full_file = os.path.join(self.current_folder, oldest_file)
+            if os.path.exists(full_file):
+                os.remove(full_file)
+            else:
+                print("The oldest saved file does not exist")
+            self._dump_files[file].remove(oldest_file)
+
+        with open(os.path.join(self.current_folder, 'version.pkl'), 'wb') as f:
+            pkl.dump(self._dump_files, f, pkl.HIGHEST_PROTOCOL)
+        return versioned_filename
+
+    def dump(self, name, obj, type='pickle', keep=-1, **kwargs):
+        self._dump(name, obj, keep, self._io_method[type + '_save'], **kwargs)
+
+    def load(self, file, type='pickle', version=-1, **kwargs):
+        return self._load(file, self._io_method[type + '_load'], version, **kwargs)
+
+    def _dump(self, name, obj, keep, method, **kwargs):
+        """Should not be called directly."""
         assert isinstance(keep, int), 'keep must be an int, got %s' % type(keep)
 
-        file = os.path.join(self.current_folder, file)
         if keep < 2:
-            with open(file, 'wb') as f:
-                pkl.dump(obj, f, pkl.HIGHEST_PROTOCOL)
-                f.close()
-            print('Object dumped to %s' % file)
+            name = os.path.join(self.current_folder, name)
+            method(name, obj, **kwargs)
+            print('Object dumped to %s' % name)
         else:
-            name, ext = os.path.splitext(file)
-            file_name = os.path.normpath(name + '-%d' % self.__iter + ext)
+            normed_name = self._versioning(name, keep)
+            normed_name = os.path.join(self.current_folder, normed_name)
+            method(normed_name, obj, **kwargs)
+            print('Object dumped to %s' % normed_name)
 
-            if self.__dump_files.get(file, None) is None:
-                self.__dump_files[file] = []
-
-            if file_name not in self.__dump_files[file]:
-                self.__dump_files[file].append(file_name)
-
-            with open(file_name, 'wb') as f:
-                pkl.dump(obj, f, pkl.HIGHEST_PROTOCOL)
-                f.close()
-            print('Object dumped to %s' % file_name)
-
-            if len(self.__dump_files[file]) > keep:
-                oldest_key = self.__dump_files[file][0]
-                if os.path.exists(oldest_key):
-                    os.remove(oldest_key)
-                else:
-                    print("The oldest saved file does not exist")
-                self.__dump_files[file].remove(oldest_key)
-        with open(os.path.join(self.current_folder, 'version.pkl'), 'wb') as f:
-            pkl.dump(self.__dump_files, f, pkl.HIGHEST_PROTOCOL)
-
-    def load(self, file, version=-1):
+    def _load(self, file, method, version=-1, **kwargs):
+        """Should not be called directly."""
         assert isinstance(version, int), 'keep must be an int, got %s' % type(version)
-        with open(os.path.join(self.current_folder, 'version.pkl'), 'rb') as f:
-            self.__dump_files = pkl.load(f)
 
         full_file = os.path.join(self.current_folder, file)
-        versions = self.__dump_files.get(os.path.normpath(full_file), [])
-        if version <= 0:
-            if len(versions) > 0:
-                latest = versions[-1]
-                with open(latest, 'rb') as f:
-                    obj = pkl.load(f)
-                    f.close()
-            else:
-                with open(full_file, 'rb') as f:
-                    obj = pkl.load(f)
-                    f.close()
-        else:
+        try:
+            with open(os.path.join(self.current_folder, 'version.pkl'), 'rb') as f:
+                self._dump_files = pkl.load(f)
+
+            versions = self._dump_files.get(file, [])
             if len(versions) == 0:
+                try:
+                    obj = method(full_file, **kwargs)
+                except FileNotFoundError:
+                    print('No file named %s found' % file)
+                    return None
+            else:
+                if version <= 0:
+                    if len(versions) > 0:
+                        latest = versions[-1]
+                        obj = method(os.path.join(self.current_folder, latest), **kwargs)
+                    else:
+                        return method(full_file, **kwargs)
+                else:
+                    name, ext = os.path.splitext(file)
+                    file_name = os.path.normpath(name + '-%d' % version + ext)
+                    if file_name in versions:
+                        obj = method(os.path.join(self.current_folder, file_name), **kwargs)
+                    else:
+                        print('Version %d of %s is not found in %s' % (version, file, self.current_folder))
+                        return None
+        except FileNotFoundError:
+            try:
+                obj = method(full_file, **kwargs)
+            except FileNotFoundError:
                 print('No file named %s found' % file)
                 return None
-            else:
-                name, ext = os.path.splitext(full_file)
-                file_name = os.path.normpath(name + '-%d' % version + ext)
-                if file_name in versions:
-                    with open(file_name, 'rb') as f:
-                        obj = pkl.load(f)
-                        f.close()
-                else:
-                    print('Version %d of %s is not found' % (version, file))
-                    return None
+
         text = str(version) if version > 0 else 'latest'
         print('Version \'%s\' loaded' % text)
         return obj
 
+    def _save_pickle(self, name, obj):
+        with open(name, 'wb') as f:
+            pkl.dump(obj, f, pkl.HIGHEST_PROTOCOL)
+            f.close()
+
+    def _load_pickle(self, name):
+        with open(name, 'rb') as f:
+            obj = pkl.load(f)
+            f.close()
+        return obj
+
+    def _save_txt(self, name, obj, **kwargs):
+        np.savetxt(name, obj, delimiter=',', **kwargs)
+
+    def _load_txt(self, name, **kwargs):
+        return np.loadtxt(name, delimiter=',', **kwargs)
+
+    def _save_torch(self, name, obj, **kwargs):
+        T.save(obj, name, **kwargs)
+
+    def _load_torch(self, name, **kwargs):
+        return T.load(name, **kwargs)
+
     def reset(self):
-        self.__num_since_beginning = collections.defaultdict(lambda: {})
-        self.__num_since_last_flush = collections.defaultdict(lambda: {})
-        self.__img_since_last_flush = collections.defaultdict(lambda: {})
-        self.__hist_since_last_flush = collections.defaultdict(lambda: {})
-        self.__iter = 0
-        self.__timer = 0.
+        self._num_since_beginning = collections.defaultdict(lambda: {})
+        self._num_since_last_flush = collections.defaultdict(lambda: {})
+        self._img_since_last_flush = collections.defaultdict(lambda: {})
+        self._hist_since_beginning = collections.defaultdict(lambda: {})
+        self._hist_since_last_flush = collections.defaultdict(lambda: {})
+        self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
+        self._options = collections.defaultdict(lambda: {})
+        self._dump_files = collections.OrderedDict()
+        self._iter = self.checkpoint
+        self._timer = time.time()
 
     def read_log(self, log):
         with open(os.path.join(self.current_folder, log), 'rb') as f:
