@@ -25,6 +25,9 @@ class UpsamplingLayer(nn.Upsample, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if s is None else s for s in self.input_shape]
         return (shape[:2] + self.new_shape) if self.size \
             else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
@@ -42,6 +45,9 @@ class AvgPool2d(nn.AvgPool2d, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if x is None else x for x in self.input_shape]
         shape[2] = (shape[2] + 2 * self.padding[0] - self.kernel_size[0]) // self.stride[0] + 1
         shape[3] = (shape[3] + 2 * self.padding[1] - self.kernel_size[1]) // self.stride[1] + 1
@@ -72,6 +78,9 @@ class MaxPool2d(nn.MaxPool2d, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if x is None else x for x in self.input_shape]
         ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(self.kernel_size, self.dilation)]
         shape[2] = (shape[2] + 2 * self.padding[0] - ks[0]) // self.stride[0] + 1
@@ -101,6 +110,9 @@ class GlobalAvgPool2D(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         output_shape = tuple(self.input_shape[:2])
         return output_shape if not self.keepdim else output_shape + (1, 1)
 
@@ -119,6 +131,9 @@ class Cat(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]
         depth = sum([shape_nan[i][self.dim] for i in range(len(self.input_shape))])
         shape = list(shape_nan[0])
@@ -140,6 +155,9 @@ class Reshape(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         if -1 in self.new_shape:
             if self.new_shape[0] == -1 and len(self.new_shape) == len(self.input_shape):
                 output = list(self.new_shape)
@@ -170,6 +188,9 @@ class Flatten(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if x is None else x for x in self.input_shape]
         start_dim = self.start_dim if self.start_dim != -1 else len(self.input_shape) - 1
         end_dim = self.end_dim if self.end_dim != -1 else len(self.input_shape) - 1
@@ -192,6 +213,9 @@ class DimShuffle(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])
 
     def __repr__(self):

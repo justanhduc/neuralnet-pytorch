@@ -61,8 +61,9 @@ def eval_tracked_variables():
 
 
 class Monitor:
-    def __init__(self, model_name='my_model', root='results', current_folder=None, checkpoint=0, use_visdom=False,
-                 server='http://localhost', port=8097, disable_visdom_logging=True, print_freq=None, **kwargs):
+    def __init__(self, model_name='my_model', root='results', current_folder=None, use_visdom=False, print_freq=None,
+                 **kwargs):
+        self._iter = 0
         self._num_since_beginning = collections.defaultdict(lambda: {})
         self._num_since_last_flush = collections.defaultdict(lambda: {})
         self._img_since_last_flush = collections.defaultdict(lambda: {})
@@ -71,22 +72,17 @@ class Monitor:
         self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
         self._options = collections.defaultdict(lambda: {})
         self._dump_files = collections.OrderedDict()
-        self._iter = checkpoint
         self._timer = time.time()
         self._training_checkpoint = 'training.pt'
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
-        self.root = root
-        self.name = model_name
         self.print_freq = print_freq
-        self.checkpoint = checkpoint
-
         if current_folder:
             self.current_folder = current_folder
         else:
-            self.path = os.path.join(self.root, self.name)
+            self.path = os.path.join(root, model_name)
             os.makedirs(self.path, exist_ok=True)
             subfolders = os.listdir(self.path)
             self.current_folder = os.path.join(self.path, 'run%d' % (len(subfolders) + 1))
@@ -98,13 +94,17 @@ class Monitor:
 
         self.use_visdom = use_visdom
         if use_visdom:
-            if disable_visdom_logging:
+            if kwargs.pop('disable_visdom_logging', True):
                 import logging
                 logging.disable(logging.CRITICAL)
+
+            server = kwargs.pop('server', 'http://localhost')
+            port = kwargs.pop('port', 8097)
             self.vis = visdom.Visdom(server=server, port=port)
             if not self.vis.check_connection():
                 from subprocess import Popen, PIPE
                 Popen('visdom', stdout=PIPE, stderr=PIPE)
+
             self.vis.close()
             print('You can navigate to \'%s:%d\' for visualization' % (server, port))
 
@@ -114,6 +114,15 @@ class Monitor:
     @property
     def iter(self):
         return self._iter
+
+    def set_iter(self, iter_num):
+        self._iter = iter_num
+
+    def set_num_stats(self, stats_dict):
+        self._num_since_beginning.update(stats_dict)
+
+    def set_hist_stats(self, stats_dict):
+        self._hist_since_beginning.update(stats_dict)
 
     def __del__(self):
         self.flush()
@@ -256,14 +265,14 @@ class Monitor:
                 fig = plt.figure()
                 ax = fig.add_subplot(111, projection='3d')
                 ax.scatter(*[vals[:, i] for i in range(vals.shape[-1])])
-                plt.savefig(os.path.join(self.current_folder, name + '.jpg'))
+                plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
                 plt.close()
             elif len(vals.shape) == 3:
                 for ii in range(vals.shape[0]):
                     fig = plt.figure()
                     ax = fig.add_subplot(111, projection='3d')
                     ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
-                    plt.savefig(os.path.join(self.current_folder, name + '_%d.jpg' % (ii + 1)))
+                    plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
                     plt.close()
         self._pointcloud_since_last_flush.clear()
 
@@ -297,7 +306,7 @@ class Monitor:
         return versioned_filename
 
     def dump(self, name, obj, type='pickle', keep=-1, **kwargs):
-        self._dump(name, obj, keep, self._io_method[type + '_save'], **kwargs)
+        self._dump(name.replace(' ', '_'), obj, keep, self._io_method[type + '_save'], **kwargs)
 
     def load(self, file, type='pickle', version=-1, **kwargs):
         return self._load(file, self._io_method[type + '_load'], version, **kwargs)
@@ -370,10 +379,10 @@ class Monitor:
         return obj
 
     def _save_txt(self, name, obj, **kwargs):
-        np.savetxt(name, obj, delimiter=',', **kwargs)
+        np.savetxt(name, obj, **kwargs)
 
     def _load_txt(self, name, **kwargs):
-        return np.loadtxt(name, delimiter=',', **kwargs)
+        return np.loadtxt(name, **kwargs)
 
     def _save_torch(self, name, obj, **kwargs):
         T.save(obj, name, **kwargs)
@@ -390,7 +399,7 @@ class Monitor:
         self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
         self._options = collections.defaultdict(lambda: {})
         self._dump_files = collections.OrderedDict()
-        self._iter = self.checkpoint
+        self._iter = 0
         self._timer = time.time()
 
     def read_log(self, log):

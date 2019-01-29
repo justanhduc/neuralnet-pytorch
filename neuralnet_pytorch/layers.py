@@ -14,7 +14,7 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
            'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation', 'Sequential', 'Layer', 'Lambda',
-           'Module', 'Softmax']
+           'Module', 'Softmax', 'Sum']
 
 
 class NetMethod:
@@ -22,8 +22,7 @@ class NetMethod:
     @utils.validate
     def output_shape(self):
         assert not hasattr(super(), 'output_shape')
-
-        return tuple(self.input_shape)
+        return None if self.input_shape is None else tuple(self.input_shape)
 
     @property
     def params(self):
@@ -82,7 +81,7 @@ class Layer(NetMethod):
 
 
 class Module(nn.Module, Layer, NetMethod):
-    def __init__(self, input_shape):
+    def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
 
@@ -112,13 +111,16 @@ class Module(nn.Module, Layer, NetMethod):
 
 
 class Sequential(nn.Sequential, NetMethod):
-    def __init__(self, input_shape, *args):
+    def __init__(self, input_shape=None, *args):
         super().__init__(*args)
         self.input_shape = input_shape
 
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         layers = list(self.children())
         return layers[-1].output_shape if layers else self.input_shape
 
@@ -189,6 +191,9 @@ class WrapperLayer(Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [1 if x is None else x for x in self.input_shape]
         dummy = T.zeros(*shape)
         dummy = self(dummy)
@@ -210,6 +215,9 @@ class Lambda(Module):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         if self.output_shape_tmp:
             return self.output_shape_tmp
         else:
@@ -284,9 +292,12 @@ class Conv2d(nn.Conv2d, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if s is None else s for s in self.input_shape]
-        shape[2:] = [(s - self.ks[idx] + 2 * self.padding[idx]) // self.stride[idx] + 1 for idx, s in
-                     enumerate(shape[2:])]
+        padding = (self.ks[0] >> 1, self.ks[1] >> 1) if self.border_mode in ('ref', 'rep') else self.padding
+        shape[2:] = [(s - self.ks[idx] + 2 * padding[idx]) // self.stride[idx] + 1 for idx, s in enumerate(shape[2:])]
         shape[1] = self.out_channels
         return tuple(shape)
 
@@ -323,6 +334,9 @@ class FC(nn.Linear, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         return self.input_shape[0], self.out_features
 
     def reset_parameters(self):
@@ -387,11 +401,6 @@ class ConvNormAct(Sequential):
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
-
-    @property
-    @utils.validate
-    def output_shape(self):
-        return self.norm.output_shape
 
     def __repr__(self):
         string = 'ConvNormAct({}, {}, {}, padding={}, stride={}, activation={})'.format(self.input_shape,
@@ -460,11 +469,6 @@ class ResNetBasicBlock(Sequential):
         out += self.downsample(res)
         return self.activation(out, **self.kwargs)
 
-    @property
-    @utils.validate
-    def output_shape(self):
-        return self.block.output_shape
-
     def __repr__(self):
         string = 'ResNetBasicBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape,
                                                                                  self.out_channels, self.kernel_size,
@@ -530,6 +534,9 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
     @property
     @utils.validate
     def output_shape(self):
+        if self.input_shape is None:
+            return None
+
         shape = [np.nan if s is None else s for s in self.input_shape]
         h = ((shape[1] - 1) * self.stride[0]) + self.kernel_size[0] + \
             np.mod(shape[1] + 2 * self.padding[0] - self.kernel_size[0], self.stride[0]) - 2 * self.padding[0]
@@ -575,11 +582,6 @@ class StackingConv(Sequential):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    @property
-    @utils.validate
-    def output_shape(self):
-        return self[self.num_layers - 1].output_shape
-
     def __repr__(self):
         string = 'StackingConv({}, {}, {}, num_layers={}, stride={}, activation={})'.format(self.input_shape,
                                                                                             self.num_filters,
@@ -588,3 +590,22 @@ class StackingConv(Sequential):
                                                                                             self.stride,
                                                                                             self.activation)
         return string
+
+
+class Sum(Module):
+    def __init__(self, input_shapes):
+        super().__init__(input_shapes)
+
+    def forward(self, *input):
+        return sum(input)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if self.input_shape is None:
+            return None
+
+        return tuple(self.input_shape[0])
+
+    def __repr__(self):
+        return 'Sum({}, output_shape={})'.format(self.input_shape, self.output_shape)

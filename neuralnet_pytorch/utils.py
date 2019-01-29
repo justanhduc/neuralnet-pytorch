@@ -12,7 +12,7 @@ from PIL import Image
 
 cuda_available = T.cuda.is_available()
 
-__all__ = ['cuda_available']
+__all__ = ['cuda_available', 'DataLoader']
 
 
 def validate(func):
