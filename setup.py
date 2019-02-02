@@ -6,8 +6,8 @@ version_data = versioneer.get_versions()
 
 if version_data['error'] is not None:
     # Get the fallback version
-    # We can't import theano.version as it isn't yet installed, so parse it.
-    fname = os.path.join(os.path.split(__file__)[0], "theano", "version.py")
+    # We can't import neuralnet_pytorch.version as it isn't yet installed, so parse it.
+    fname = os.path.join(os.path.split(__file__)[0], "neuralnet_pytorch", "version.py")
     with open(fname, "r") as f:
         lines = f.readlines()
     lines = [l for l in lines if l.startswith("FALLBACK_VERSION")]
