@@ -36,7 +36,6 @@ def setup_package():
             'Development Status :: 3 - Alpha',
             'Intended Audience :: End Users/Desktop',
             'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
-            'Operating System :: Microsoft :: Windows :: Windows 10',
             'Operating System :: POSIX :: Linux',
             'Programming Language :: Python :: 3 :: Only',
             'Programming Language :: Python :: 3.5'

@@ -55,7 +55,7 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return T.mean(T.abs(x - y) ** p)
 
 
-def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
+def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
     """
     The Pytorch code is adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
     The CUDA code is adapted from https://github.com/ThibaultGROUEIX/AtlasNet/tree/master/extension
