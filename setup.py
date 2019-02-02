@@ -1,37 +1,31 @@
 from setuptools import setup, find_packages
 import os
+import versioneer
 
-AUTHOR = 'DUC NGUYEN'
-MAJOR = 0
-MINOR = 0
-MICRO = '3'
-VERSION = '%d.%d.%s' % (MAJOR, MINOR, MICRO)
+version_data = versioneer.get_versions()
 
+if version_data['error'] is not None:
+    # Get the fallback version
+    # We can't import theano.version as it isn't yet installed, so parse it.
+    fname = os.path.join(os.path.split(__file__)[0], "theano", "version.py")
+    with open(fname, "r") as f:
+        lines = f.readlines()
+    lines = [l for l in lines if l.startswith("FALLBACK_VERSION")]
+    assert len(lines) == 1
 
-def write_version_py(filename='neuralnet_pytorch/_version.py'):
-    cnt = """
-#THIS FILE IS GENRERATED FROM SETUP.PY
+    FALLBACK_VERSION = lines[0].split("=")[1].strip().strip('""')
 
-version = '%(version)s'
-author = '%(author)s'
-"""
-    a = open(filename, 'w')
-    try:
-        a.write(cnt % {'version': VERSION,
-                       'author': AUTHOR})
-    finally:
-        a.close()
+    version_data['version'] = FALLBACK_VERSION
 
 
 def setup_package():
-    write_version_py()
     here = os.path.abspath(os.path.dirname(__file__))
     with open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
 
     setup(
         name='neuralnet-pytorch',
-        version=VERSION,
+        version=version_data['version'],
         description='A high-level library on top of Pytorch.',
         long_description=long_description,
         long_description_content_type='text/markdown',
