@@ -12,12 +12,11 @@ import torch.nn as nn
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock',
-           'ResNetBottleneckBlock', 'FC', 'WrapperLayer', 'Activation', 'Sequential', 'Layer', 'Lambda',
-           'Module', 'Softmax', 'Sum']
+__all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
+           'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv']
 
 
-class NetMethod:
+class _NetMethod:
     @property
     @utils.validate
     def output_shape(self):
@@ -27,13 +26,11 @@ class NetMethod:
     @property
     def params(self):
         assert not hasattr(super(), 'params')
-
         return tuple(self.state_dict().values())
 
     @property
     def trainable(self):
         assert not hasattr(super(), 'trainable')
-
         return tuple([p for p in self.parameters() if p.requires_grad])
 
     @property
@@ -50,7 +47,6 @@ class NetMethod:
 
     def save(self, param_file):
         assert not hasattr(super(), 'save')
-
         params_np = utils.bulk_to_numpy(self.params)
         params_dict = OrderedDict(zip(list(self.state_dict().keys()), params_np))
         T.save(params_dict, param_file)
@@ -58,7 +54,6 @@ class NetMethod:
 
     def load(self, param_file, eval=True):
         assert not hasattr(super(), 'load')
-
         params_dict = T.load(param_file)
         if cuda_available:
             params_cuda = utils.bulk_to_cuda(params_dict.values())
@@ -75,42 +70,13 @@ class NetMethod:
         pass
 
 
-class Layer(NetMethod):
-    def __init__(self):
-        self.input_shape = None
-
-
-class Module(nn.Module, Layer, NetMethod):
+class Module(nn.Module, _NetMethod):
     def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
 
-    def add_module(self, name, module):
-        r"""Adds a child module to the current module. Modified to be able to add WrapperLayer.
 
-        The module can be accessed as an attribute using the given name.
-
-        Args:
-            name (string): name of the child module. The child module can be
-                accessed from this module using the given name
-            parameter (Module): child module to be added to the module.
-        """
-        if not isinstance(module, (nn.Module, WrapperLayer)) and module is not None:
-            raise TypeError("{} is not a Module/Wrapper subclass".format(
-                T.typename(module)))
-        elif not isinstance(name, T._six.string_classes):
-            raise TypeError("module name should be a string. Got {}".format(
-                T.typename(name)))
-        elif hasattr(self, name) and name not in self._modules:
-            raise KeyError("attribute '{}' already exists".format(name))
-        elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
-        elif name == '':
-            raise KeyError("module name can't be empty string \"\"")
-        self._modules[name] = module
-
-
-class Sequential(nn.Sequential, NetMethod):
+class Sequential(nn.Sequential, _NetMethod):
     def __init__(self, input_shape=None, *args):
         super().__init__(*args)
         self.input_shape = input_shape
@@ -142,62 +108,37 @@ class Sequential(nn.Sequential, NetMethod):
         for m in self.children():
             m.reset_parameters()
 
-    def add_module(self, name, module):
-        r"""Adds a child module to the current module. Modified to be able to add WrapperLayer.
 
-        The module can be accessed as an attribute using the given name.
+def Wrapper(input_shape, layer, *args, **kwargs):
+    class _Wrapper(layer, _NetMethod):
+        def __init__(self):
+            self.output_shape_tmp = kwargs.pop('output_shape', None)
+            super().__init__(*args, **kwargs)
+            self.input_shape = input_shape
+            if cuda_available:
+                self.cuda()
 
-        Args:
-            name (string): name of the child module. The child module can be
-                accessed from this module using the given name
-            parameter (Module): child module to be added to the module.
-        """
-        if not isinstance(module, (nn.Module, WrapperLayer)) and module is not None:
-            raise TypeError("{} is not a Module/Wrapper subclass".format(
-                T.typename(module)))
-        elif not isinstance(name, T._six.string_classes):
-            raise TypeError("module name should be a string. Got {}".format(
-                T.typename(name)))
-        elif hasattr(self, name) and name not in self._modules:
-            raise KeyError("attribute '{}' already exists".format(name))
-        elif '.' in name:
-            raise KeyError("module name can't contain \".\"")
-        elif name == '':
-            raise KeyError("module name can't be empty string \"\"")
-        self._modules[name] = module
+        @property
+        @utils.validate
+        def output_shape(self):
+            if self.input_shape is None:
+                return None
 
+            if self.output_shape_tmp:
+                return self.output_shape_tmp
+            else:
+                none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
+                shape = [1 if s is None else s for s in self.input_shape]
+                dummy = T.zeros(*shape)
+                if cuda_available:
+                    dummy.cuda()
+                dummy = self(dummy)
+                output_shape = list(dummy.shape)
+                for k in none_indices:
+                    output_shape[k] = None
+                return tuple(output_shape)
 
-class WrapperLayer(Layer):
-    def __init__(self, input_shape, layer, *args, **kwargs):
-        super(WrapperLayer, self).__init__()
-        self.input_shape = input_shape
-        device = kwargs.pop('device', None)
-        self.__wrapped_layer = layer(*args, **kwargs)
-        if cuda_available:
-            self.cuda(device)
-
-    def __getattr__(self, item):
-        try:
-            return self.__wrapped_layer.__getattribute__(item)
-        except AttributeError:
-            return super(WrapperLayer, self).__getattribute__(item)
-
-    def __call__(self, *args, **kwargs):
-        return self.__wrapped_layer(*args, **kwargs)
-
-    def __repr__(self):
-        return str(self.__wrapped_layer)
-
-    @property
-    @utils.validate
-    def output_shape(self):
-        if self.input_shape is None:
-            return None
-
-        shape = [1 if x is None else x for x in self.input_shape]
-        dummy = T.zeros(*shape)
-        dummy = self(dummy)
-        return tuple(dummy.shape)
+    return _Wrapper()
 
 
 class Lambda(Module):
@@ -233,10 +174,10 @@ class Lambda(Module):
             return tuple(output_shape)
 
     def __repr__(self):
-        return 'Lambda({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
 
 
-class Conv2d(nn.Conv2d, Layer):
+class Conv2d(nn.Conv2d, _NetMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
                  bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
         assert isinstance(input_shape, list) or isinstance(input_shape,
@@ -310,25 +251,29 @@ class Conv2d(nn.Conv2d, Layer):
             self.bias_init(self.bias)
 
 
-class FC(nn.Linear, Layer):
+class FC(nn.Linear, _NetMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
-                 keepdim=False, **kwargs):
+                 flatten=False, keepdim=False, **kwargs):
         assert None not in input_shape[1:], 'Shape of input must be known for FC layer'
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
+        self.flatten = flatten
         self.keepdim = keepdim
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
         self.kwargs = kwargs
 
-        super().__init__(int(np.prod(self.input_shape[1:])), out_features, bias)
+        super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input):
-        output = self.activation(super().forward(T.flatten(input, 1)), **self.kwargs)
+        if self.flatten:
+            input = T.flatten(input, 1)
+
+        output = self.activation(super().forward(input), **self.kwargs)
         return output.flatten() if self.out_features == 1 and not self.keepdim else output
 
     @property
@@ -337,7 +282,10 @@ class FC(nn.Linear, Layer):
         if self.input_shape is None:
             return None
 
-        return self.input_shape[0], self.out_features
+        if self.flatten:
+            return self.input_shape[0], self.out_features
+        else:
+            return self.input_shape[:-1] + (self.out_features,)
 
     def reset_parameters(self):
         super().reset_parameters()
@@ -356,7 +304,8 @@ class Softmax(FC):
                          weights_init=weights_init, bias_init=bias_init, **kwargs)
 
     def __repr__(self):
-        return 'Softmax({}, out_features={}, dim={})'.format(self.input_shape, self.out_features, self.dim)
+        return self.__class__.__name__ + '({}, out_features={}, dim={})'.format(self.input_shape, self.out_features,
+                                                                                self.dim)
 
 
 class Activation(Module):
@@ -373,7 +322,7 @@ class Activation(Module):
         return self.activation(input, **self.kwargs)
 
     def __repr__(self):
-        return 'Activation({})'.format(self.activation)
+        return self.__class__.__name__ + '({})'.format(self.activation)
 
 
 class ConvNormAct(Sequential):
@@ -403,10 +352,8 @@ class ConvNormAct(Sequential):
             self.cuda(kwargs.pop('device', None))
 
     def __repr__(self):
-        string = 'ConvNormAct({}, {}, {}, padding={}, stride={}, activation={})'.format(self.input_shape,
-                                                                                        self.out_channels,
-                                                                                        self.kernel_size, self.padding,
-                                                                                        self.stride, self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, padding={}, stride={}, activation={})'.format(
+            self.input_shape, self.out_channels, self.kernel_size, self.padding, self.stride, self.activation)
         return string
 
 
@@ -470,9 +417,8 @@ class ResNetBasicBlock(Sequential):
         return self.activation(out, **self.kwargs)
 
     def __repr__(self):
-        string = 'ResNetBasicBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape,
-                                                                                 self.out_channels, self.kernel_size,
-                                                                                 self.stride, self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={})'.format(
+            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation)
         return string
 
 
@@ -485,14 +431,12 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
                          weights_init=weights_init, bias_init=bias_init, norm_method=norm_method, **kwargs)
 
     def __repr__(self):
-        string = 'ResNetBottleNeckBlock({}, {}, {}, stride={}, activation={})'.format(self.input_shape,
-                                                                                      self.out_channels,
-                                                                                      self.kernel_size, self.stride,
-                                                                                      self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={})'.format(
+            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation)
         return string
 
 
-class ConvTranspose2d(nn.ConvTranspose2d, Layer):
+class ConvTranspose2d(nn.ConvTranspose2d, _NetMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
                  dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple. Received %s.' % type(
@@ -521,13 +465,11 @@ class ConvTranspose2d(nn.ConvTranspose2d, Layer):
 
         self.convtrans = nn.ConvTranspose2d(int(input_shape[0]), out_channels, kernel_size, stride, padding,
                                             output_padding, groups, bias, dilation)
-        self.regularizable += tuple([self.bias])
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
-        output_size = self.kwargs.pop('output_size', None)
+    def forward(self, input, output_size=None):
         output = self.activation(super().forward(input, output_size=output_size), **self.kwargs)
         return output
 
@@ -583,12 +525,8 @@ class StackingConv(Sequential):
             self.cuda(kwargs.pop('device', None))
 
     def __repr__(self):
-        string = 'StackingConv({}, {}, {}, num_layers={}, stride={}, activation={})'.format(self.input_shape,
-                                                                                            self.num_filters,
-                                                                                            self.filter_size,
-                                                                                            self.num_layers,
-                                                                                            self.stride,
-                                                                                            self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, num_layers={}, stride={}, activation={})'.format(
+            self.input_shape, self.num_filters, self.filter_size, self.num_layers, self.stride, self.activation)
         return string
 
 
@@ -608,4 +546,123 @@ class Sum(Module):
         return tuple(self.input_shape[0])
 
     def __repr__(self):
-        return 'Sum({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
+
+
+class DepthwiseSepConv2D(Sequential):
+    """ Depthwise separable convolution"""
+
+    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', activation=None):
+        """
+        :param input_shape: Shape of input features
+        :param out_channels: Length of output features (first dimension)
+        :param kernel_size: Size of convolutional kernel
+        :param depth_mul: Depth multiplier for middle part of separable convolution
+        :param activation: Activation function
+        """
+        super().__init__(input_shape)
+        self.depth_mul = depth_mul
+        self.activation = activation
+        self.add_module('depthwise', Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, padding=padding,
+                                            groups=input_shape[1]))
+        self.add_module('pointwise', Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
+                                            bias=False))
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}, {}, {}, depth_mul={}, padding={}, activation={})'.format(
+            self.input_shape, self[-1].out_channels, self[0].kernel_size, self.depth_mul, self[0].padding,
+            self.activation)
+
+
+class XConv(Module):
+    def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul,
+                 activation='relu', dropout=None, bn=True):
+        super().__init__(input_shape)
+        self.feature_dim = feature_dim
+        self.out_channels = out_channels
+        self.num_neighbors = num_neighbors
+        self.out_features = out_features
+        self.depth_mul = depth_mul
+        self.activation = activation
+        self.dropout = dropout
+        self.bn = bn
+
+        self.fcs = Sequential(input_shape)
+        self.fcs.add_module('fc1', FC(self.fcs.output_shape, out_features, activation=activation))
+        if dropout:
+            self.fcs.add_module('dropout1', Wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+        self.fcs.add_module('fc2', FC(self.fcs.output_shape, out_features, activation=activation))
+        if dropout:
+            self.fcs.add_module('dropout2', Wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+
+        from neuralnet_pytorch.resizing import DimShuffle
+        from neuralnet_pytorch.normalization import BatchNorm2d
+
+        self.x_trans = Sequential(input_shape[:2] + (num_neighbors, input_shape[-1]))
+        self.x_trans.add_module('dimshuffle1', DimShuffle(self.x_trans.output_shape, (0, 3, 1, 2)))
+        self.x_trans.add_module('conv', Conv2d(self.x_trans.output_shape, num_neighbors ** 2, (1, num_neighbors),
+                                               activation=activation, padding='valid'))
+        self.x_trans.add_module('dimshuffle2', DimShuffle(self.x_trans.output_shape, (0, 2, 3, 1)))
+        self.x_trans.add_module('fc1', FC(self.x_trans.output_shape, num_neighbors ** 2, activation='relu'))
+        self.x_trans.add_module('fc2', FC(self.x_trans.output_shape, num_neighbors ** 2))
+
+        self.end_conv = Sequential(input_shape[:2] + (num_neighbors, feature_dim + out_features))
+        self.end_conv.add_module('dimshuffle1', DimShuffle(self.end_conv.output_shape, (0, 3, 1, 2)))
+        self.end_conv.add_module('conv',
+                                 DepthwiseSepConv2D(self.end_conv.output_shape, out_channels, (1, num_neighbors),
+                                                    depth_mul=depth_mul, activation=None if bn else activation,
+                                                    padding='valid'))
+        if bn:
+            self.end_conv.add_module('bn', BatchNorm2d(self.end_conv.output_shape, momentum=.9, activation=activation))
+        self.end_conv.add_module('dimshuffle2', DimShuffle(self.end_conv.output_shape, (0, 2, 3, 1)))
+
+    def forward(self, *input):
+        rep_pt, pts, fts = input
+
+        if fts is not None:
+            assert rep_pt.size()[0] == pts.size()[0] == fts.size()[0]  # Check N is equal.
+            assert rep_pt.size()[1] == pts.size()[1] == fts.size()[1]  # Check P is equal.
+            assert pts.size()[2] == fts.size()[2] == self.num_neighbors  # Check K is equal.
+            assert fts.size()[3] == self.feature_dim  # Check C_in is equal.
+        else:
+            assert rep_pt.size()[0] == pts.size()[0]  # Check N is equal.
+            assert rep_pt.size()[1] == pts.size()[1]  # Check P is equal.
+            assert pts.size()[2] == self.num_neighbors  # Check K is equal.
+        assert rep_pt.size()[2] == pts.size()[3] == self.input_shape[-1]  # Check dims is equal.
+
+        N = len(pts)
+        P = rep_pt.size()[1]  # (N, P, K, dims)
+        p_center = T.unsqueeze(rep_pt, dim=2)  # (N, P, 1, dims)
+
+        # Move pts to local coordinate system of rep_pt.
+        pts_local = pts - p_center  # (N, P, K, dims)
+
+        # Individually lift each point into C_mid space.
+        fts_lifted = self.fcs(pts_local)  # (N, P, K, C_mid)
+
+        if fts is None:
+            fts_cat = fts_lifted
+        else:
+            fts_cat = T.cat((fts_lifted, fts), -1)  # (N, P, K, C_mid + C_in)
+
+        # Learn the (N, K, K) X-transformation matrix.
+        X_shape = (N, P, self.num_neighbors, self.num_neighbors)
+        X = self.x_trans(pts_local)
+        X = X.view(*X_shape)
+
+        # Weight and permute fts_cat with the learned X.
+        fts_X = T.matmul(X, fts_cat)
+        fts_p = self.end_conv(fts_X).squeeze(dim=2)
+        return fts_p
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.input_shape[:2] + (self.out_channels,)
+
+    def __repr__(self):
+        return self.__class__.__name__ + \
+               '({}, feature_dim={}, out_channels={}, out_features={}, num_neighbors={}, depth_mul={}, ' \
+               'activation={}, dropout={}, bn={})'.format(
+                   self.input_shape, self.feature_dim, self.out_channels, self.out_features, self.num_neighbors,
+                   self.depth_mul, self.activation, self.dropout, self.bn)
