@@ -13,7 +13,8 @@ from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
-           'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv']
+           'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
+           'GraphConv']
 
 
 class _NetMethod:
@@ -113,10 +114,12 @@ def Wrapper(input_shape, layer, *args, **kwargs):
     class _Wrapper(layer, _NetMethod):
         def __init__(self):
             self.output_shape_tmp = kwargs.pop('output_shape', None)
-            super().__init__(*args, **kwargs)
+            device = kwargs.pop('device', None)
             self.input_shape = input_shape
+
+            super().__init__(*args, **kwargs)
             if cuda_available:
-                self.cuda()
+                self.cuda(device)
 
         @property
         @utils.validate
@@ -666,3 +669,40 @@ class XConv(Module):
                'activation={}, dropout={}, bn={})'.format(
                    self.input_shape, self.feature_dim, self.out_channels, self.out_features, self.num_neighbors,
                    self.depth_mul, self.activation, self.dropout, self.bn)
+
+
+class GraphConv(FC):
+    """
+    Simple GCN layer, similar to https://arxiv.org/abs/1609.02907
+    Adapted from https://github.com/tkipf/pygcn/blob/master/pygcn/layers.py
+    """
+
+    def __init__(self, input_shape, out_features, bias=True, activation=None):
+        self.input_shape = input_shape
+        super().__init__(input_shape, out_features, bias, activation=activation)
+
+    def reset_parameters(self):
+        if self.weights_init is None:
+            stdv = 1. / np.sqrt(self.weight.size(1))
+            self.weight.data.uniform_(-stdv, stdv)
+        else:
+            self.weights_init(self.weight)
+
+        if self.bias is not None:
+            if self.bias_init is None:
+                self.bias.data.uniform_(-stdv, stdv)
+            else:
+                self.bias_init(self.bias)
+
+    def forward(self, input, adj):
+        support = T.mm(input, self.weight.t())
+        output = T.sparse.mm(adj, support)
+        if self.bias is not None:
+            output = output + self.bias
+
+        if self.activation is not None:
+            output = self.activation(output)
+        return output
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}, {})'.format(self.input_shape, self.out_features)
