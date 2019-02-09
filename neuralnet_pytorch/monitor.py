@@ -6,14 +6,11 @@ updated Jan 14, 2019
 
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
-import numpy as np
-import os
-
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import cm
+
+import numpy as np
 import collections
 import pickle as pkl
 from imageio import imwrite
@@ -125,7 +122,7 @@ class Monitor:
         self._hist_since_beginning.update(stats_dict)
 
     def __del__(self):
-        self.flush()
+        self._flush()
         plt.close()
 
     def dump_model(self, network):
@@ -141,7 +138,7 @@ class Monitor:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.print_freq:
             if self._iter % self.print_freq == 0:
-                self.flush()
+                self._flush()
         self.tick()
 
     def copy_file(self, file):
@@ -165,7 +162,7 @@ class Monitor:
             self._options[name]['n_bins'] = n_bins
         self._hist_since_last_flush[name][self._iter] = value
 
-    def flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
+    def _flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
         plt.close()
         use_visdom_for_plots = self.use_visdom if use_visdom_for_plots is None else use_visdom_for_plots
         use_visdom_for_image = self.use_visdom if use_visdom_for_image is None else use_visdom_for_image
@@ -181,11 +178,6 @@ class Monitor:
             plt.xlabel('iteration')
             plt.ylabel(name)
             y_vals = [self._num_since_beginning[name][x] for x in x_vals]
-            max_, min_, med_ = np.max(y_vals), np.min(y_vals), np.median(y_vals)
-            argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
-            plt.title(
-                'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_], min_,
-                                                                                          x_vals[argmin_], med_))
             if isinstance(y_vals[0], dict):
                 keys = list(y_vals[0].keys())
                 y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
@@ -194,8 +186,15 @@ class Monitor:
                 prints.append(
                     "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
             else:
+                max_, min_, med_ = np.max(y_vals), np.min(y_vals), np.median(y_vals)
+                argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
+                plt.title(
+                    'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_],
+                                                                                              min_,
+                                                                                              x_vals[argmin_], med_))
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.5f}".format(name, np.mean(np.array(list(vals.values())), 0)))
+
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if use_visdom_for_plots:
                 self.vis.matplot(fig, win=name)
@@ -301,7 +300,7 @@ class Monitor:
                 print("The oldest saved file does not exist")
             self._dump_files[file].remove(oldest_file)
 
-        with open(os.path.join(self.current_folder, 'version.pkl'), 'wb') as f:
+        with open(os.path.join(self.current_folder, '_version.pkl'), 'wb') as f:
             pkl.dump(self._dump_files, f, pkl.HIGHEST_PROTOCOL)
         return versioned_filename
 
@@ -331,7 +330,7 @@ class Monitor:
 
         full_file = os.path.join(self.current_folder, file)
         try:
-            with open(os.path.join(self.current_folder, 'version.pkl'), 'rb') as f:
+            with open(os.path.join(self.current_folder, '_version.pkl'), 'rb') as f:
                 self._dump_files = pkl.load(f)
 
             versions = self._dump_files.get(file, [])

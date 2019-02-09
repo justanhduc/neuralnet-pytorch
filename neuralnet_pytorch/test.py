@@ -13,23 +13,27 @@ def assert_list_close(x, y):
         testing.assert_allclose(x_, y)
 
 
-def sanity_check(module1, module2, shape=(64, 3, 32, 32)):
-    input = T.from_numpy(np.random.rand(*shape).astype('float32'))
-
+def sanity_check(module1, module2, shape=None, *args):
     try:
         module1.load_state_dict(module2.state_dict())
     except RuntimeError:
         params = nnt.utils.batch_get_value(module2.state_dict().values())
         nnt.utils.batch_set_value(module1.state_dict().values(), params)
 
-    if cuda_available:
-        input = input.cuda()
-        module1 = module1.cuda()
-        module2 = module2.cuda()
+    if shape is not None:
+        input = T.from_numpy(np.random.rand(*shape).astype('float32'))
+        if cuda_available:
+            input = input.cuda()
+            module1 = module1.cuda()
+            module2 = module2.cuda()
 
-    expected = module2(input)
-    testing.assert_allclose(module1(input), expected)
-    testing.assert_allclose(module1.output_shape, tuple(expected.shape))
+        expected = module2(input)
+        testing.assert_allclose(module1(input), expected)
+        testing.assert_allclose(module1.output_shape, tuple(expected.shape))
+    else:
+        expected = module2(args)
+        testing.assert_allclose(module1(*args), expected)
+        testing.assert_allclose(module1.output_shape, tuple(expected.shape))
 
 
 def conv1x1(in_planes, out_planes, stride=1):

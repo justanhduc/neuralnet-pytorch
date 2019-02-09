@@ -4,12 +4,12 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import Layer, Module, cuda_available
+from neuralnet_pytorch.layers import _NetMethod, Module, cuda_available
 
 __all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D']
 
 
-class UpsamplingLayer(nn.Upsample, Layer):
+class UpsamplingLayer(nn.Upsample, _NetMethod):
     def __init__(self, input_shape, size=None, scale_factor=None, mode='bilinear', align_corners=True, **kwargs):
         assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
                                                              'Received %s.' % type(scale_factor)
@@ -33,7 +33,7 @@ class UpsamplingLayer(nn.Upsample, Layer):
             else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
 
 
-class AvgPool2d(nn.AvgPool2d, Layer):
+class AvgPool2d(nn.AvgPool2d, _NetMethod):
     def __init__(self, input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False):
         self.input_shape = input_shape
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
@@ -64,7 +64,7 @@ class AvgPool2d(nn.AvgPool2d, Layer):
         return tuple(shape)
 
 
-class MaxPool2d(nn.MaxPool2d, Layer):
+class MaxPool2d(nn.MaxPool2d, _NetMethod):
     def __init__(self, input_shape, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
                  ceil_mode=False):
         self.input_shape = input_shape
@@ -117,7 +117,7 @@ class GlobalAvgPool2D(Module):
         return output_shape if not self.keepdim else output_shape + (1, 1)
 
     def __str__(self):
-        return 'GlobalAvgPool2D({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
 
 
 class Cat(Module):
@@ -141,7 +141,7 @@ class Cat(Module):
         return tuple(shape)
 
     def __repr__(self):
-        return 'Cat({}, dim={}, output_shape={})'.format(self.input_shape, self.dim, self.output_shape)
+        return self.__class__.__name__ + '({}, dim={}, output_shape={})'.format(self.input_shape, self.dim, self.output_shape)
 
 
 class Reshape(Module):
@@ -173,7 +173,8 @@ class Reshape(Module):
             return tuple(self.new_shape)
 
     def __repr__(self):
-        return 'Reshape({}, new_shape={}, output_shape={})'.format(self.input_shape, self.new_shape, self.output_shape)
+        return self.__class__.__name__ + '({}, new_shape={}, output_shape={})'.format(
+            self.input_shape, self.new_shape, self.output_shape)
 
 
 class Flatten(Module):
@@ -198,8 +199,8 @@ class Flatten(Module):
         return shape
 
     def __repr__(self):
-        return 'Flatten({}, start_dim={}, end_dim={}, output_shape={})'.format(self.input_shape, self.start_dim,
-                                                                               self.end_dim, self.output_shape)
+        return self.__class__.__name__ + '({}, start_dim={}, end_dim={}, output_shape={})'.format(
+            self.input_shape, self.start_dim, self.end_dim, self.output_shape)
 
 
 class DimShuffle(Module):
@@ -219,4 +220,5 @@ class DimShuffle(Module):
         return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])
 
     def __repr__(self):
-        return 'DimShuffle({}, pattern={}, output_shape={})'.format(self.input_shape, self.pattern, self.output_shape)
+        return self.__class__.__name__ + '({}, pattern={}, output_shape={})'.format(
+            self.input_shape, self.pattern, self.output_shape)
