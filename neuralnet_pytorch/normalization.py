@@ -57,13 +57,17 @@ class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
 
 
 class LayerNorm(nn.LayerNorm, _NetMethod):
-    def __init__(self, input_shape, eps=1e-5, elementwise_affine=True):
+    def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, **kwargs):
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
         self.input_shape = input_shape
         super().__init__(input_shape[1:], eps, elementwise_affine)
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
 
 
 class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
-    def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False):
+    def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
         self.input_shape = input_shape
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
