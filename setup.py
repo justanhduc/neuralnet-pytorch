@@ -1,6 +1,7 @@
 from setuptools import setup, find_packages
 import os
 import versioneer
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 version_data = versioneer.get_versions()
 
@@ -40,8 +41,17 @@ def setup_package():
             'Programming Language :: Python :: 3 :: Only',
             'Programming Language :: Python :: 3.5'
         ],
-        platforms=['Windows', 'Linux'],
+        platforms=['Linux'],
         packages=find_packages(exclude=['examples']),
+        ext_modules=[
+            CUDAExtension('chamfer', [
+                'neuralnet_pytorch/extensions/chamfer_cuda.cpp',
+                'neuralnet_pytorch/extensions/chamfer.cu',
+            ]),
+        ],
+        cmdclass={
+            'build_ext': BuildExtension
+        },
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
