@@ -61,7 +61,6 @@ class _NetMethod:
             params_dict = OrderedDict(zip(list(params_dict.keys()), params_cuda))
 
         self.load_state_dict(params_dict)
-
         if eval:
             self.eval()
         print('Model weights loaded from %s' % param_file)
