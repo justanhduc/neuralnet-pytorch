@@ -2,7 +2,7 @@ import torch as T
 from torch import optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-__all__ = ['NAdam', 'WarmRestart']
+__all__ = ['NAdam', 'WarmRestart', 'InverseLR']
 
 
 class NAdam(optim.Adam):
@@ -79,3 +79,13 @@ class WarmRestart(CosineAnnealingLR):
             self.last_epoch = 0
             self.T_max *= self.T_mult
         return super().get_lr()
+
+
+class InverseLR(optim.lr_scheduler.LambdaLR):
+    """Decreases lr every iteration by the inverse of gamma times iteration plus 1
+
+    lr = lr / (1 + gamma * t)
+    """
+    def __init__(self, optimizer, gamma, last_epoch=-1):
+        self.gamma = gamma
+        super().__init__(optimizer, lambda it: 1. / (1. + gamma * it), last_epoch)
