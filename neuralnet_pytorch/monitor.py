@@ -163,26 +163,26 @@ class Monitor:
         self._hist_since_last_flush[name][self._iter] = value
 
     def _flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
-        plt.close()
         use_visdom_for_plots = self.use_visdom if use_visdom_for_plots is None else use_visdom_for_plots
         use_visdom_for_image = self.use_visdom if use_visdom_for_image is None else use_visdom_for_image
 
         prints = []
         # plot statistics
+        fig, ax = plt.subplots()
+        line, = ax.plot(np.random.rand(1))
+        plt.xlabel('iteration')
         for name, vals in list(self._num_since_last_flush.items()):
             self._num_since_beginning[name].update(vals)
 
             x_vals = np.sort(list(self._num_since_beginning[name].keys()))
-            fig = plt.figure()
-            fig.clf()
-            plt.xlabel('iteration')
             plt.ylabel(name)
             y_vals = [self._num_since_beginning[name][x] for x in x_vals]
             if isinstance(y_vals[0], dict):
                 keys = list(y_vals[0].keys())
                 y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
-                plot = plt.plot(x_vals, y_vals)
-                plt.legend(plot, keys)
+                line.set_xdata(x_vals)
+                line.set_ydata(y_vals)
+                plt.legend(line, keys)
                 prints.append(
                     "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
             else:
@@ -192,14 +192,15 @@ class Monitor:
                     'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_],
                                                                                               min_,
                                                                                               x_vals[argmin_], med_))
-                plt.plot(x_vals, y_vals)
+                line.set_xdata(x_vals)
+                line.set_ydata(y_vals)
                 prints.append("{}\t{:.5f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if use_visdom_for_plots:
                 self.vis.matplot(fig, win=name)
-            plt.close(fig)
         self._num_since_last_flush.clear()
+        fig.clear()
 
         # save recorded images
         for name, vals in list(self._img_since_last_flush.items()):
@@ -232,17 +233,15 @@ class Monitor:
             n_bins = self._options[name].get('n_bins')
             last_only = self._options[name].get('last_only')
 
-            fig = plt.figure()
-            fig.clf()
             if last_only:
                 k = max(list(self._hist_since_last_flush[name].keys()))
-                val = vals[k].flatten()
+                val = np.array(vals[k]).flatten()
                 plt.hist(val, bins='auto')
             else:
                 self._hist_since_beginning[name].update(vals)
 
                 z_vals = np.sort(list(self._hist_since_beginning[name].keys()))
-                vals = [self._hist_since_beginning[name][i].flatten() for i in z_vals]
+                vals = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
                 hists = [np.histogram(val, bins=n_bins) for val in vals]
                 y_vals = np.array([hists[i][0] for i in range(len(hists))])
                 x_vals = np.array([hists[i][1] for i in range(len(hists))])
@@ -254,26 +253,24 @@ class Monitor:
                 ax.view_init(45, -90)
                 fig.colorbar(surf, shrink=0.5, aspect=5)
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_hist.jpg'))
-            plt.close(fig)
+            fig.clear()
         self._hist_since_last_flush.clear()
 
         # scatter pointcloud(s)
         for name, vals in list(self._pointcloud_since_last_flush.items()):
             vals = list(vals.values())[-1]
             if len(vals.shape) == 2:
-                fig = plt.figure()
                 ax = fig.add_subplot(111, projection='3d')
                 ax.scatter(*[vals[:, i] for i in range(vals.shape[-1])])
                 plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
-                plt.close()
             elif len(vals.shape) == 3:
                 for ii in range(vals.shape[0]):
-                    fig = plt.figure()
                     ax = fig.add_subplot(111, projection='3d')
                     ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
                     plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
-                    plt.close()
+            fig.clear()
         self._pointcloud_since_last_flush.clear()
+        plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({**self._num_since_beginning, **self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
