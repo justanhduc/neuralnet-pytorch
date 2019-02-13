@@ -117,7 +117,7 @@ class GlobalAvgPool2D(Module):
         return output_shape if not self.keepdim else output_shape + (1, 1)
 
     def __str__(self):
-        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
 class Cat(Module):
@@ -141,7 +141,7 @@ class Cat(Module):
         return tuple(shape)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, dim={}, output_shape={})'.format(self.input_shape, self.dim, self.output_shape)
+        return self.__class__.__name__ + '({}, dim={}) -> {}'.format(self.input_shape, self.dim, self.output_shape)
 
 
 class Reshape(Module):
@@ -173,7 +173,7 @@ class Reshape(Module):
             return tuple(self.new_shape)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, new_shape={}, output_shape={})'.format(
+        return self.__class__.__name__ + '({}, new_shape={}) -> {}'.format(
             self.input_shape, self.new_shape, self.output_shape)
 
 
@@ -199,7 +199,7 @@ class Flatten(Module):
         return shape
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, start_dim={}, end_dim={}, output_shape={})'.format(
+        return self.__class__.__name__ + '({}, start_dim={}, end_dim={}) -> {}'.format(
             self.input_shape, self.start_dim, self.end_dim, self.output_shape)
 
 
@@ -220,5 +220,5 @@ class DimShuffle(Module):
         return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, pattern={}, output_shape={})'.format(
+        return self.__class__.__name__ + '({}, pattern={}) -> {}'.format(
             self.input_shape, self.pattern, self.output_shape)

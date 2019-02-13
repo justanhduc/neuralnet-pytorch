@@ -75,6 +75,9 @@ class Module(nn.Module, _NetMethod):
         super().__init__()
         self.input_shape = input_shape
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class Sequential(nn.Sequential, _NetMethod):
     def __init__(self, input_shape=None, *args):
@@ -107,6 +110,9 @@ class Sequential(nn.Sequential, _NetMethod):
     def reset_parameters(self):
         for m in self.children():
             m.reset_parameters()
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
 def Wrapper(input_shape, layer, *args, **kwargs):
@@ -176,7 +182,7 @@ class Lambda(Module):
             return tuple(output_shape)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
 class Conv2d(nn.Conv2d, _NetMethod):
@@ -306,8 +312,8 @@ class Softmax(FC):
                          weights_init=weights_init, bias_init=bias_init, **kwargs)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, out_features={}, dim={})'.format(self.input_shape, self.out_features,
-                                                                                self.dim)
+        return self.__class__.__name__ + '({}, out_features={}, dim={}) -> {}'.format(
+            self.input_shape, self.out_features, self.dim, self.output_shape)
 
 
 class Activation(Module):
@@ -324,7 +330,7 @@ class Activation(Module):
         return self.activation(input, **self.kwargs)
 
     def __repr__(self):
-        return self.__class__.__name__ + '({})'.format(self.activation)
+        return self.__class__.__name__ + '({}) -> {}'.format(self.activation, self.output_shape)
 
 
 class ConvNormAct(Sequential):
@@ -354,8 +360,9 @@ class ConvNormAct(Sequential):
             self.cuda(kwargs.pop('device', None))
 
     def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, padding={}, stride={}, activation={})'.format(
-            self.input_shape, self.out_channels, self.kernel_size, self.padding, self.stride, self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, padding={}, stride={}, activation={}) -> {}'.format(
+            self.input_shape, self.out_channels, self.kernel_size, self.padding, self.stride, self.activation,
+            self.output_shape)
         return string
 
 
@@ -419,8 +426,8 @@ class ResNetBasicBlock(Sequential):
         return self.activation(out, **self.kwargs)
 
     def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={})'.format(
-            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={}) -> {}'.format(
+            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation, self.output_shape)
         return string
 
 
@@ -527,8 +534,9 @@ class StackingConv(Sequential):
             self.cuda(kwargs.pop('device', None))
 
     def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, num_layers={}, stride={}, activation={})'.format(
-            self.input_shape, self.num_filters, self.filter_size, self.num_layers, self.stride, self.activation)
+        string = self.__class__.__name__ + '({}, {}, {}, num_layers={}, stride={}, activation={}) -> {}'.format(
+            self.input_shape, self.num_filters, self.filter_size, self.num_layers, self.stride, self.activation,
+            self.output_shape)
         return string
 
 
@@ -548,7 +556,7 @@ class Sum(Module):
         return tuple(self.input_shape[0])
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, output_shape={})'.format(self.input_shape, self.output_shape)
+        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
 class DepthwiseSepConv2D(Sequential):
@@ -571,9 +579,9 @@ class DepthwiseSepConv2D(Sequential):
                                             bias=False))
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, {}, {}, depth_mul={}, padding={}, activation={})'.format(
+        return self.__class__.__name__ + '({}, {}, {}, depth_mul={}, padding={}, activation={}) -> {}'.format(
             self.input_shape, self[-1].out_channels, self[0].kernel_size, self.depth_mul, self[0].padding,
-            self.activation)
+            self.activation, self.output_shape)
 
 
 class XConv(Module):
@@ -665,9 +673,9 @@ class XConv(Module):
     def __repr__(self):
         return self.__class__.__name__ + \
                '({}, feature_dim={}, out_channels={}, out_features={}, num_neighbors={}, depth_mul={}, ' \
-               'activation={}, dropout={}, bn={})'.format(
+               'activation={}, dropout={}, bn={}) -> {}'.format(
                    self.input_shape, self.feature_dim, self.out_channels, self.out_features, self.num_neighbors,
-                   self.depth_mul, self.activation, self.dropout, self.bn)
+                   self.depth_mul, self.activation, self.dropout, self.bn, self.output_shape)
 
 
 class GraphConv(FC):
@@ -689,6 +697,7 @@ class GraphConv(FC):
 
         if self.bias is not None:
             if self.bias_init is None:
+                stdv = 1. / np.sqrt(self.weight.size(1))
                 self.bias.data.uniform_(-stdv, stdv)
             else:
                 self.bias_init(self.bias)
@@ -704,4 +713,4 @@ class GraphConv(FC):
         return output
 
     def __repr__(self):
-        return self.__class__.__name__ + '({}, {})'.format(self.input_shape, self.out_features)
+        return self.__class__.__name__ + '({}, {}) -> {}'.format(self.input_shape, self.out_features, self.output_shape)
