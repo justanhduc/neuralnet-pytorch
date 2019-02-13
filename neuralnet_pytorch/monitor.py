@@ -168,8 +168,7 @@ class Monitor:
 
         prints = []
         # plot statistics
-        fig, ax = plt.subplots()
-        line, = ax.plot(np.random.rand(1))
+        fig = plt.figure()
         plt.xlabel('iteration')
         for name, vals in list(self._num_since_last_flush.items()):
             self._num_since_beginning[name].update(vals)
@@ -180,9 +179,8 @@ class Monitor:
             if isinstance(y_vals[0], dict):
                 keys = list(y_vals[0].keys())
                 y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
-                line.set_xdata(x_vals)
-                line.set_ydata(y_vals)
-                plt.legend(line, keys)
+                plot = plt.plot(x_vals, y_vals)
+                plt.legend(plot, keys)
                 prints.append(
                     "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
             else:
@@ -192,8 +190,7 @@ class Monitor:
                     'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_],
                                                                                               min_,
                                                                                               x_vals[argmin_], med_))
-                line.set_xdata(x_vals)
-                line.set_ydata(y_vals)
+                plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.5f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
