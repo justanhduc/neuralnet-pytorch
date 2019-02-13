@@ -146,6 +146,9 @@ def Wrapper(input_shape, layer, *args, **kwargs):
                     output_shape[k] = None
                 return tuple(output_shape)
 
+        def __repr__(self):
+            return super().__repr__() + ' -> {}'.format(self.output_shape)
+
     return _Wrapper()
 
 
@@ -258,6 +261,9 @@ class Conv2d(nn.Conv2d, _NetMethod):
         if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class FC(nn.Linear, _NetMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
@@ -302,6 +308,9 @@ class FC(nn.Linear, _NetMethod):
 
         if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
 class Softmax(FC):

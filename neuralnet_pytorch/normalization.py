@@ -29,6 +29,9 @@ class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
@@ -55,6 +58,9 @@ class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class LayerNorm(nn.LayerNorm, _NetMethod):
     def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, **kwargs):
@@ -64,6 +70,9 @@ class LayerNorm(nn.LayerNorm, _NetMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
@@ -71,3 +80,6 @@ class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
