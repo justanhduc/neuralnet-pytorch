@@ -32,6 +32,9 @@ class UpsamplingLayer(nn.Upsample, _NetMethod):
         return (shape[:2] + self.new_shape) if self.size \
             else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
 
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
 
 class AvgPool2d(nn.AvgPool2d, _NetMethod):
     def __init__(self, input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False):
@@ -62,6 +65,9 @@ class AvgPool2d(nn.AvgPool2d, _NetMethod):
             if self.ceil_mode:
                 shape[3] += np.mod(shape[3], self.stride[1])
         return tuple(shape)
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
 class MaxPool2d(nn.MaxPool2d, _NetMethod):
@@ -96,6 +102,9 @@ class MaxPool2d(nn.MaxPool2d, _NetMethod):
             if self.ceil_mode:
                 shape[3] += np.mod(shape[3], self.stride[1])
         return tuple(shape)
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
 class GlobalAvgPool2D(Module):
