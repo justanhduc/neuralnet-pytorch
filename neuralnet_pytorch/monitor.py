@@ -21,6 +21,7 @@ import visdom
 from shutil import copyfile
 import torch as T
 import torch.nn as nn
+from tensorboardX import SummaryWriter
 
 from neuralnet_pytorch import utils
 
@@ -59,8 +60,8 @@ def eval_tracked_variables():
 
 
 class Monitor:
-    def __init__(self, model_name='my_model', root='results', current_folder=None, use_visdom=False, print_freq=None,
-                 num_iters=None, **kwargs):
+    def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
+                 use_visdom=False, use_tensorboard=False, **kwargs):
         self._iter = 0
         self._num_since_beginning = collections.defaultdict(lambda: {})
         self._num_since_last_flush = collections.defaultdict(lambda: {})
@@ -71,7 +72,6 @@ class Monitor:
         self._options = collections.defaultdict(lambda: {})
         self._dump_files = collections.OrderedDict()
         self._timer = time.time()
-        self._training_checkpoint = 'training.pt'
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
@@ -79,6 +79,13 @@ class Monitor:
         self.print_freq = print_freq
         if current_folder:
             self.current_folder = current_folder
+            try:
+                with open(os.path.join(self.current_folder, 'log.pkl'), 'rb') as f:
+                    log = pkl.load(f)
+                self.set_num_stats(log['num'])
+                self.set_hist_stats(log['hist'])
+            except (FileNotFoundError, KeyError):
+                print('\'log.pkl\' not found in \'%s\' or no stats recorded' % self.current_folder)
         else:
             self.path = os.path.join(root, model_name)
             os.makedirs(self.path, exist_ok=True)
@@ -106,6 +113,11 @@ class Monitor:
             self.vis.close()
             print('You can navigate to \'%s:%d\' for visualization' % (server, port))
 
+        self.use_tensorboard = use_tensorboard
+        if use_tensorboard:
+            os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
+            self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
+
         self.num_iters = num_iters
         self.kwargs = kwargs
         print('Result folder: %s' % self.current_folder)
@@ -126,6 +138,8 @@ class Monitor:
     def __del__(self):
         self._flush()
         plt.close()
+        if self.use_tensorboard:
+            self.writer.close()
 
     def dump_model(self, network):
         assert isinstance(network, (
@@ -151,18 +165,25 @@ class Monitor:
 
     def plot(self, name, value):
         self._num_since_last_flush[name][self._iter] = value
+        if self.use_tensorboard:
+            self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
 
     def scatter(self, name, value):
         self._pointcloud_since_last_flush[name][self._iter] = value
 
     def save_image(self, name, value, callback=lambda x: x):
         self._img_since_last_flush[name][self._iter] = callback(value)
+        if self.use_tensorboard:
+            self.writer.add_image('image/' + name.replace(' ', '-'), value, self._iter)
 
     def hist(self, name, value, n_bins=20, last_only=False):
         if self._iter == 0:
             self._options[name]['last_only'] = last_only
             self._options[name]['n_bins'] = n_bins
+
         self._hist_since_last_flush[name][self._iter] = value
+        if self.use_tensorboard:
+            self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
 
     def _flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
         use_visdom_for_plots = self.use_visdom if use_visdom_for_plots is None else use_visdom_for_plots
@@ -193,7 +214,7 @@ class Monitor:
                                                                                               min_,
                                                                                               x_vals[argmin_], med_))
                 plt.plot(x_vals, y_vals)
-                prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
+                prints.append("{}\t{:.5f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if use_visdom_for_plots:
@@ -272,12 +293,12 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({**self._num_since_beginning, **self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning)}, f, pkl.HIGHEST_PROTOCOL)
 
-        iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
-                                                                (self._iter % self.num_iters) / self.num_iters * 100.,
-                                                                self._iter // self.num_iters + 1) if self.num_iters \
-            else 'Iteration {}'.format(self._iter)
+        iter_show = 'Iteration {}/{} ({}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
+                                                           (self._iter % self.num_iters) / self.num_iters * 100.,
+                                                           self._iter // self.num_iters + 1) if self.num_iters else 'Iteration {}'.format(
+            self._iter)
         print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show, '\t'.join(prints)))
 
     def _versioning(self, file, keep):
