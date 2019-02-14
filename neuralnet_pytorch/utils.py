@@ -19,6 +19,9 @@ def validate(func):
     """make sure output shape is a list of ints"""
 
     def func_wrapper(self):
+        if func(self) is None:
+            return None
+
         shape = [None if x is None else None if np.isnan(x) else x for x in func(self)]
         out = [int(x) if x is not None else x for x in shape]
         return tuple(out)
