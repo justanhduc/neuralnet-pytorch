@@ -193,7 +193,7 @@ class Monitor:
                                                                                               min_,
                                                                                               x_vals[argmin_], med_))
                 plt.plot(x_vals, y_vals)
-                prints.append("{}\t{:.5f}".format(name, np.mean(np.array(list(vals.values())), 0)))
+                prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if use_visdom_for_plots:
@@ -274,10 +274,10 @@ class Monitor:
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({**self._num_since_beginning, **self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
 
-        iter_show = 'Iteration {}/{} ({}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
-                                                           (self._iter % self.num_iters) / self.num_iters * 100.,
-                                                           self._iter // self.num_iters + 1) if self.num_iters else 'Iteration {}'.format(
-            self._iter)
+        iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
+                                                                (self._iter % self.num_iters) / self.num_iters * 100.,
+                                                                self._iter // self.num_iters + 1) if self.num_iters \
+            else 'Iteration {}'.format(self._iter)
         print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show, '\t'.join(prints)))
 
     def _versioning(self, file, keep):
