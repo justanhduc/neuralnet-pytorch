@@ -6,6 +6,7 @@ updated Jan 14, 2019
 
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -59,7 +60,7 @@ def eval_tracked_variables():
 
 class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, use_visdom=False, print_freq=None,
-                 **kwargs):
+                 num_iters=None, **kwargs):
         self._iter = 0
         self._num_since_beginning = collections.defaultdict(lambda: {})
         self._num_since_last_flush = collections.defaultdict(lambda: {})
@@ -105,6 +106,7 @@ class Monitor:
             self.vis.close()
             print('You can navigate to \'%s:%d\' for visualization' % (server, port))
 
+        self.num_iters = num_iters
         self.kwargs = kwargs
         print('Result folder: %s' % self.current_folder)
 
@@ -272,8 +274,11 @@ class Monitor:
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({**self._num_since_beginning, **self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
 
-        print("Elapsed time {:.2f}min \t Iteration {}\t{}".format((time.time() - self._timer) / 60., self._iter,
-                                                                  "\t".join(prints)))
+        iter_show = 'Iteration {}/{} ({}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
+                                                           (self._iter % self.num_iters) / self.num_iters * 100.,
+                                                           self._iter // self.num_iters + 1) if self.num_iters else 'Iteration {}'.format(
+            self._iter)
+        print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show, '\t'.join(prints)))
 
     def _versioning(self, file, keep):
         name, ext = os.path.splitext(file)
