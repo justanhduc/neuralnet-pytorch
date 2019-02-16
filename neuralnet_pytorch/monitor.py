@@ -82,6 +82,8 @@ class Monitor:
             try:
                 with open(os.path.join(self.current_folder, 'log.pkl'), 'rb') as f:
                     log = pkl.load(f)
+                    f.close()
+                self.set_iter(log['iter'])
                 self.set_num_stats(log['num'])
                 self.set_hist_stats(log['hist'])
             except (FileNotFoundError, KeyError):
@@ -293,7 +295,8 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning)}, f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'iter': self._iter, 'num': dict(self._num_since_beginning),
+                      'hist': dict(self._hist_since_beginning)}, f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
                                                                 (self._iter % self.num_iters) / self.num_iters * 100.,

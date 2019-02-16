@@ -41,9 +41,7 @@ class _NetMethod:
         if hasattr(self, 'weight'):
             return tuple([self.weight])
         else:
-            r = []
-            for m in self.children():
-                r.extend(m.regularizable if hasattr(m, 'regularizable') else [])
+            r = [m.regularizable for m in self.children() if hasattr(m, 'regularizable')]
             return tuple(r)
 
     def save(self, param_file):
