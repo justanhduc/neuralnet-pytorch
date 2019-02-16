@@ -11,6 +11,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
+import atexit
+import threading
+import queue
 import numpy as np
 import collections
 import pickle as pkl
@@ -121,8 +124,14 @@ class Monitor:
             os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
             self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
 
+        self.q = queue.Queue()
+        self.thread = threading.Thread(target=self._work, daemon=True)
+        self.thread.start()
+
         self.num_iters = num_iters
         self.kwargs = kwargs
+
+        atexit.register(self._atexit)
         print('Result folder: %s' % self.current_folder)
 
     @property
@@ -138,11 +147,13 @@ class Monitor:
     def set_hist_stats(self, stats_dict):
         self._hist_since_beginning.update(stats_dict)
 
-    def __del__(self):
+    def _atexit(self):
         self._flush()
         plt.close()
         if self.use_tensorboard:
             self.writer.close()
+
+        self.q.join()
 
     def dump_model(self, network):
         assert isinstance(network, (
@@ -188,15 +199,14 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
 
-    def _flush(self, use_visdom_for_plots=None, use_visdom_for_image=None):
-        use_visdom_for_plots = self.use_visdom if use_visdom_for_plots is None else use_visdom_for_plots
-        use_visdom_for_image = self.use_visdom if use_visdom_for_image is None else use_visdom_for_image
-
+    def _worker(self, it, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
+                _pointcloud_since_last_flush):
         prints = []
+
         # plot statistics
         fig = plt.figure()
         plt.xlabel('iteration')
-        for name, vals in list(self._num_since_last_flush.items()):
+        for name, vals in list(_num_since_last_flush.items()):
             self._num_since_beginning[name].update(vals)
 
             x_vals = np.sort(list(self._num_since_beginning[name].keys()))
@@ -208,56 +218,57 @@ class Monitor:
                 plot = plt.plot(x_vals, y_vals)
                 plt.legend(plot, keys)
                 prints.append(
-                    "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
+                    "{}\t{:.5f}".format(name,
+                                        np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
             else:
                 max_, min_, med_ = np.max(y_vals), np.min(y_vals), np.median(y_vals)
                 argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
                 plt.title(
                     'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_],
                                                                                               min_,
-                                                                                              x_vals[argmin_], med_))
+                                                                                              x_vals[argmin_],
+                                                                                              med_))
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
-            if use_visdom_for_plots:
+            if self.use_visdom:
                 self.vis.matplot(fig, win=name)
-        self._num_since_last_flush.clear()
         fig.clear()
 
         # save recorded images
-        for name, vals in list(self._img_since_last_flush.items()):
+        for name, vals in list(_img_since_last_flush.items()):
             for val in vals.values():
                 if val.dtype != 'uint8':
                     val = (255.99 * val).astype('uint8')
                 if len(val.shape) == 4:
-                    if use_visdom_for_image:
+                    if self.use_visdom:
                         self.vis.images(val, win=name)
                     for num in range(val.shape[0]):
                         img = val[num]
                         if img.shape[0] == 3:
                             img = np.transpose(img, (1, 2, 0))
-                            imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % num), img)
+                            imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % num),
+                                    img)
                         else:
                             for ch in range(img.shape[0]):
                                 img_normed = (img[ch] - np.min(img[ch])) / (np.max(img[ch]) - np.min(img[ch]))
                                 imwrite(os.path.join(self.current_folder,
                                                      name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
                 elif len(val.shape) == 3 or len(val.shape) == 2:
-                    if use_visdom_for_image:
+                    if self.use_visdom:
                         self.vis.image(val if len(val.shape) == 2 else np.transpose(val, (2, 0, 1)), win=name)
                     imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'), val)
                 else:
                     raise NotImplementedError
-        self._img_since_last_flush.clear()
 
         # make histograms of recorded data
-        for name, vals in list(self._hist_since_last_flush.items()):
+        for name, vals in list(_hist_since_last_flush.items()):
             n_bins = self._options[name].get('n_bins')
             last_only = self._options[name].get('last_only')
 
             if last_only:
-                k = max(list(self._hist_since_last_flush[name].keys()))
+                k = max(list(_hist_since_last_flush[name].keys()))
                 val = np.array(vals[k]).flatten()
                 plt.hist(val, bins='auto')
             else:
@@ -277,10 +288,9 @@ class Monitor:
                 fig.colorbar(surf, shrink=0.5, aspect=5)
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_hist.jpg'))
             fig.clear()
-        self._hist_since_last_flush.clear()
 
         # scatter pointcloud(s)
-        for name, vals in list(self._pointcloud_since_last_flush.items()):
+        for name, vals in list(_pointcloud_since_last_flush.items()):
             vals = list(vals.values())[-1]
             if len(vals.shape) == 2:
                 ax = fig.add_subplot(111, projection='3d')
@@ -292,18 +302,33 @@ class Monitor:
                     ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
                     plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
             fig.clear()
-        self._pointcloud_since_last_flush.clear()
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': self._iter, 'num': self._num_since_beginning, 'hist': self._hist_since_beginning},
-                     f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'iter': it, 'num': self._num_since_beginning,
+                      'hist': self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
 
-        iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
-                                                                (self._iter % self.num_iters) / self.num_iters * 100.,
-                                                                self._iter // self.num_iters + 1) if self.num_iters \
-            else 'Iteration {}'.format(self._iter)
-        print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show, '\t'.join(prints)))
+        iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
+                                                                (it % self.num_iters) / self.num_iters * 100.,
+                                                                it // self.num_iters + 1) if self.num_iters \
+            else 'Iteration {}'.format(it)
+        print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show,
+                                                      '\t'.join(prints)))
+
+    def _work(self):
+        while True:
+            items = self.q.get()
+            work = items[0]
+            work(*items[1:])
+            self.q.task_done()
+
+    def _flush(self):
+        self.q.put((self._worker, self._iter, dict(self._num_since_last_flush), dict(self._img_since_last_flush),
+                    dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush)))
+        self._num_since_last_flush.clear()
+        self._img_since_last_flush.clear()
+        self._hist_since_last_flush.clear()
+        self._pointcloud_since_last_flush.clear()
 
     def _versioning(self, file, keep):
         name, ext = os.path.splitext(file)
@@ -354,7 +379,8 @@ class Monitor:
 
         full_file = os.path.join(self.current_folder, file)
         try:
-            self._dump_files = self.read_log('_version.pkl')
+            with open(os.path.join(self.current_folder, '_version.pkl'), 'rb') as f:
+                self._dump_files = pkl.load(f)
 
             versions = self._dump_files.get(file, [])
             if len(versions) == 0:
