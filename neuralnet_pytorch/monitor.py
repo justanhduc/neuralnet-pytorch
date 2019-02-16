@@ -59,17 +59,21 @@ def eval_tracked_variables():
     return dict
 
 
+def spawn_defaultdict():
+    return {}
+
+
 class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
                  use_visdom=False, use_tensorboard=False, **kwargs):
         self._iter = 0
-        self._num_since_beginning = collections.defaultdict(lambda: {})
-        self._num_since_last_flush = collections.defaultdict(lambda: {})
-        self._img_since_last_flush = collections.defaultdict(lambda: {})
-        self._hist_since_beginning = collections.defaultdict(lambda: {})
-        self._hist_since_last_flush = collections.defaultdict(lambda: {})
-        self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
-        self._options = collections.defaultdict(lambda: {})
+        self._num_since_beginning = collections.defaultdict(spawn_defaultdict)
+        self._num_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._img_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._hist_since_beginning = collections.defaultdict(spawn_defaultdict)
+        self._hist_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._pointcloud_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._options = collections.defaultdict(spawn_defaultdict)
         self._dump_files = collections.OrderedDict()
         self._timer = time.time()
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
@@ -80,10 +84,7 @@ class Monitor:
         if current_folder:
             self.current_folder = current_folder
             try:
-                with open(os.path.join(self.current_folder, 'log.pkl'), 'rb') as f:
-                    log = pkl.load(f)
-                    f.close()
-                self.set_iter(log['iter'])
+                log = self.read_log('log.pkl')
                 self.set_num_stats(log['num'])
                 self.set_hist_stats(log['hist'])
             except (FileNotFoundError, KeyError):
@@ -295,8 +296,8 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': self._iter, 'num': dict(self._num_since_beginning),
-                      'hist': dict(self._hist_since_beginning)}, f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'iter': self._iter, 'num': self._num_since_beginning, 'hist': self._hist_since_beginning},
+                     f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(self._iter % self.num_iters, self.num_iters,
                                                                 (self._iter % self.num_iters) / self.num_iters * 100.,
@@ -353,8 +354,7 @@ class Monitor:
 
         full_file = os.path.join(self.current_folder, file)
         try:
-            with open(os.path.join(self.current_folder, '_version.pkl'), 'rb') as f:
-                self._dump_files = pkl.load(f)
+            self._dump_files = self.read_log('_version.pkl')
 
             versions = self._dump_files.get(file, [])
             if len(versions) == 0:
@@ -413,19 +413,21 @@ class Monitor:
         return T.load(name, **kwargs)
 
     def reset(self):
-        self._num_since_beginning = collections.defaultdict(lambda: {})
-        self._num_since_last_flush = collections.defaultdict(lambda: {})
-        self._img_since_last_flush = collections.defaultdict(lambda: {})
-        self._hist_since_beginning = collections.defaultdict(lambda: {})
-        self._hist_since_last_flush = collections.defaultdict(lambda: {})
-        self._pointcloud_since_last_flush = collections.defaultdict(lambda: {})
-        self._options = collections.defaultdict(lambda: {})
+        self._num_since_beginning = collections.defaultdict(spawn_defaultdict)
+        self._num_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._img_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._hist_since_beginning = collections.defaultdict(spawn_defaultdict)
+        self._hist_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._pointcloud_since_last_flush = collections.defaultdict(spawn_defaultdict)
+        self._options = collections.defaultdict(spawn_defaultdict)
         self._dump_files = collections.OrderedDict()
         self._iter = 0
         self._timer = time.time()
 
     def read_log(self, log):
         with open(os.path.join(self.current_folder, log), 'rb') as f:
-            return pkl.load(f)
+            contents = pkl.load(f)
+            f.close()
+        return contents
 
     imwrite = save_image
