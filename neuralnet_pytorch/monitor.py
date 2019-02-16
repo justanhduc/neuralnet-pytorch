@@ -155,12 +155,16 @@ class Monitor:
 
         self.q.join()
 
+    def dump_rep(self, name, obj):
+        with open(os.path.join(self.current_folder, name + '.txt'), 'w') as outfile:
+            outfile.write(str(obj))
+            outfile.close()
+
     def dump_model(self, network):
         assert isinstance(network, (
             nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
             type(network))
-        with open('%s/network.txt' % self.current_folder, 'w') as outfile:
-            outfile.write(str(network))
+        self.dump_rep('network.txt', network)
 
     def __enter__(self):
         pass
