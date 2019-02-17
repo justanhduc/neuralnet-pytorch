@@ -63,7 +63,7 @@ def eval_tracked_variables():
 
 
 def spawn_defaultdict():
-    return {}
+    return collections.OrderedDict()
 
 
 class Monitor:
@@ -213,7 +213,7 @@ class Monitor:
         for name, vals in list(_num_since_last_flush.items()):
             self._num_since_beginning[name].update(vals)
 
-            x_vals = np.sort(list(self._num_since_beginning[name].keys()))
+            x_vals = list(self._num_since_beginning[name].keys())
             plt.ylabel(name)
             y_vals = [self._num_since_beginning[name][x] for x in x_vals]
             if isinstance(y_vals[0], dict):
@@ -278,7 +278,7 @@ class Monitor:
             else:
                 self._hist_since_beginning[name].update(vals)
 
-                z_vals = np.sort(list(self._hist_since_beginning[name].keys()))
+                z_vals = list(self._hist_since_beginning[name].keys())
                 vals = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
                 hists = [np.histogram(val, bins=n_bins) for val in vals]
                 y_vals = np.array([hists[i][0] for i in range(len(hists))])
