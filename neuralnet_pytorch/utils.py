@@ -71,10 +71,10 @@ def threadsafe_generator(generator):
 
 
 class DataLoader(metaclass=abc.ABCMeta):
-    def __init__(self, dataset, batch_size, shuffle=False, augmentation=None, apply_augmentation_to=(0,),
-                 return_epoch=False, infinite=False, num_cached=10, num_workers=10, **kwargs):
+    def __init__(self, dataset, batch_size, shuffle=False, num_workers=10, collate_fn=None, augmentation=None,
+                 apply_augmentation_to=(0,), num_cached=10, **kwargs):
         """
-        A lightweight data loader. Works comparably to Pytorch's Dataloader when the workload is light, but it
+                A lightweight data loader. Works comparably to Pytorch's Dataloader when the workload is light, but it
         initializes much faster. It can be a drop-in for Pytorch's Dataloader.
         Usage: Subclass this class and define the load_data method. Optionally, generator can also be defined to specify
         how to load.
@@ -88,6 +88,9 @@ class DataLoader(metaclass=abc.ABCMeta):
         :param return_epoch: whether to return epoch or iteration number. Default iteration
         :param infinite: whether to run inifinitely
         :param num_cached: number of batches to be cached
+        :param num_workers: number of threads to be used
+        :param collate_fn: function to specify how a batch is loaded
+        :param kwargs:
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -95,9 +98,8 @@ class DataLoader(metaclass=abc.ABCMeta):
         self.augmentation = augmentation
         self.num_cached = num_cached
         self.apply_to = apply_augmentation_to
-        self.infinite = infinite
-        self.return_epoch = return_epoch
         self.num_workers = num_workers
+        self.collate_fn = collate_fn
         self.kwargs = kwargs
         self.batches = None
         self.indices = None
@@ -138,11 +140,7 @@ class DataLoader(metaclass=abc.ABCMeta):
         batches = self._generate_in_background(batches)
         for it, batch in enumerate(batches):
             batch = T.tensor(batch) if isinstance(batch, np.ndarray) else [T.tensor(b) for b in batch]
-
-            if self.return_epoch:
-                yield batch
-            else:
-                yield batch
+            yield batch
 
     def _generate_in_background(self, generator):
         """
@@ -180,11 +178,13 @@ class DataLoader(metaclass=abc.ABCMeta):
 
         for i in range(self.num_batches):
             slice_ = self.indices[i * self.batch_size:(i + 1) * self.batch_size]
-            batch = [self.dataset[s] for s in slice_] if isinstance(self.dataset[0], (list, tuple)) else np.stack(
-                [self.dataset[s] for s in slice_])
+            batch = [self.dataset[s] for s in slice_]
+
+            if isinstance(batch, np.ndarray):
+                batch = np.stack(batch, 0)
 
             if isinstance(batch, (list, tuple)):
-                batch = tuple([np.stack(b) for b in zip(*batch)])
+                batch = tuple([np.stack(b) for b in zip(*batch)]) if self.collate_fn is None else self.collate_fn(batch)
 
             yield batch
 
