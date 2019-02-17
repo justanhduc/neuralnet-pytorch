@@ -309,8 +309,8 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'num': self._num_since_beginning,
-                      'hist': self._hist_since_beginning}, f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'iter': it, 'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning)},
+                     f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
                                                                 (it % self.num_iters) / self.num_iters * 100.,
