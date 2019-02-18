@@ -43,7 +43,7 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['examples']),
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy'],
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'tensorboardX'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',
