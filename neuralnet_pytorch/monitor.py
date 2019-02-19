@@ -69,6 +69,18 @@ def spawn_defaultdict():
 class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
                  use_visdom=False, use_tensorboard=False, **kwargs):
+        """Collects statistics and displays the results using various backends. The collected stats are stored in
+        '<root>/<model_name>/run<#id>' where #id is automatically assigned each time an instance is constructed.
+
+        :param model_name: name of the model folder
+        :param root: path to store the collected statistics
+        :param current_folder: if given, all the stats in here will be overwritten or resumed
+        :param print_freq: statistics display frequency
+        :param num_iters: if given, training iteration percentage will be displayed along with epoch no
+        :param use_visdom: whether to use Visdom for real-time monitoring
+        :param use_tensorboard: whether to use Tensorboard for real-time monitoring
+        :param kwargs: some miscellaneous options for Visdom and other functions
+        """
         self._iter = 0
         self._num_since_beginning = collections.defaultdict(spawn_defaultdict)
         self._num_since_last_flush = collections.defaultdict(spawn_defaultdict)
@@ -181,7 +193,10 @@ class Monitor:
     def tick(self):
         self._iter += 1
 
-    def plot(self, name, value):
+    def plot(self, name, value, smoothness=None):
+        if self._iter == 0:
+            self._options[name]['smoothness'] = smoothness
+
         self._num_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
@@ -219,6 +234,11 @@ class Monitor:
             if isinstance(y_vals[0], dict):
                 keys = list(y_vals[0].keys())
                 y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
+                if self._options[name]['smoothness']:
+                    y_vals = [
+                        utils.smooth(y_val, self._options[name]['smoothness'], self.kwargs.pop('window', 'hanning')) for
+                        y_val in y_vals]
+
                 plot = plt.plot(x_vals, y_vals)
                 plt.legend(plot, keys)
                 prints.append(
@@ -232,6 +252,10 @@ class Monitor:
                                                                                               min_,
                                                                                               x_vals[argmin_],
                                                                                               med_))
+                if self._options[name]['smoothness']:
+                    y_vals = utils.smooth(y_vals, self._options[name]['smoothness'],
+                                          self.kwargs.pop('window', 'hanning'))
+
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
 
