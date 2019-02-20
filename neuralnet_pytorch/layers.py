@@ -37,12 +37,7 @@ class _NetMethod:
     @property
     def regularizable(self):
         assert not hasattr(super(), 'regularizable')
-
-        if hasattr(self, 'weight'):
-            return tuple([self.weight])
-        else:
-            r = [m.regularizable for m in self.children() if hasattr(m, 'regularizable')]
-            return tuple(r)
+        return tuple([self.weight]) if hasattr(self, 'weight') else tuple([])
 
     def save(self, param_file):
         assert not hasattr(super(), 'save')
@@ -72,6 +67,13 @@ class Module(nn.Module, _NetMethod):
     def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
+
+    @property
+    def regularizable(self):
+        regularizable = []
+        for m in list(self.children()):
+            regularizable.extend(m.regularizable)
+        return tuple(regularizable)
 
     def __repr__(self):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
