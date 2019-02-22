@@ -41,6 +41,29 @@ def conv1x1(in_planes, out_planes, stride=1):
     return T.nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 
+def test_track():
+    shape = (2, 3, 5, 5)
+    a = T.rand(*shape)
+    if cuda_available:
+        a = a.cuda()
+
+    conv1 = nnt.track('op', nnt.Conv2d(shape, 4, 3), 'all')
+    conv2 = nnt.Conv2d(conv1.output_shape, 5, 3)
+    b = conv1(a)
+    c = nnt.track('conv2_output', conv2(b), 'all')
+    loss = T.sum(c ** 2)
+    loss.backward(retain_graph=True)
+    db = T.autograd.grad(loss, b, retain_graph=True)
+    dc = T.autograd.grad(loss, c)
+    tracked = nnt.eval_tracked_variables()
+
+    testing.assert_allclose(tracked['conv2_output'], nnt.utils.to_numpy(c))
+    testing.assert_allclose(np.stack(tracked['grad_conv2_output']), nnt.utils.to_numpy(dc[0]))
+    testing.assert_allclose(tracked['op'], nnt.utils.to_numpy(b))
+    for db_, tracked_db_ in zip(db, tracked['grad_op_output']):
+        testing.assert_allclose(tracked_db_, nnt.utils.to_numpy(db_))
+
+
 def test_ravel_index():
     shape = (2, 4, 5, 3)
     a = T.arange(np.prod(shape)).reshape(*shape)
@@ -99,10 +122,6 @@ def test_monitor():
     loaded = mon.load('foo.pt', 'torch', version=3)['a']
     testing.assert_allclose(a + 3, loaded)
     mon.reset()
-
-    # cleanup
-    import shutil
-    shutil.rmtree('results', ignore_errors=True)
 
 
 def test_softmax():
