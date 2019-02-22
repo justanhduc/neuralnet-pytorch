@@ -28,15 +28,39 @@ from tensorboardX import SummaryWriter
 
 from neuralnet_pytorch import utils
 
+__all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
+hooks = {}
 
-__all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables']
 
-
-def track(name, x):
+def track(name, x, direction=None):
     assert isinstance(name, str), 'name must be a string, got %s' % type(name)
-    assert isinstance(x, T.Tensor), 'x must be a Torch Tensor, got %s' % type(x)
-    _TRACKS[name] = x.detach()
+    assert isinstance(x, (T.nn.Module, T.Tensor)), 'x must be a Torch Module or Tensor, got %s' % type(x)
+    assert direction in (
+        'forward', 'backward', 'all', None), 'direction must be None, \'forward\', \'backward\', or \'all\''
+
+    if isinstance(x, T.nn.Module):
+        if direction in ('forward', 'all'):
+            def _forward_hook(module, input, output):
+                _TRACKS[name] = output.detach()
+
+            hooks[name] = x.register_forward_hook(_forward_hook)
+
+        if direction in ('backward', 'all'):
+            def _backward_hook(module, grad_input, grad_output):
+                _TRACKS['grad_' + name + '_output'] = tuple([grad_out.detach() for grad_out in grad_output])
+
+            hooks['grad_' + name + '_output'] = x.register_backward_hook(_backward_hook)
+    else:
+        if direction in ('forward', 'all', None):
+            _TRACKS[name] = x.detach()
+
+        if direction in ('backward', 'all'):
+            def _hook(grad):
+                _TRACKS['grad_' + name] = tuple([grad_.detach() for grad_ in grad])
+
+            hooks['grad_' + name] = x.register_hook(_hook)
+
     return x
 
 
@@ -58,7 +82,10 @@ def eval_tracked_variables():
     name, vars = get_tracked_variables(return_name=True)
     dict = collections.OrderedDict()
     for n, v in zip(name, vars):
-        dict[n] = v.item() if v.numel() == 1 else utils.to_numpy(v)
+        if isinstance(v, (list, tuple)):
+            dict[n] = [val.item() if val.numel() == 1 else utils.to_numpy(val) for val in v]
+        else:
+            dict[n] = v.item() if v.numel() == 1 else utils.to_numpy(v)
     return dict
 
 
