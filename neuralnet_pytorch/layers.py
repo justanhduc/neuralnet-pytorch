@@ -32,17 +32,26 @@ class _NetMethod:
     @property
     def trainable(self):
         assert not hasattr(super(), 'trainable')
-        return tuple([p for p in self.parameters() if p.requires_grad])
+        params = []
+        if hasattr(self, 'parameters'):
+            params = [p for p in self.parameters(recurse=False) if p.requires_grad]
+
+        for m in list(self.children()):
+            params.extend(m.trainable)
+
+        return tuple(params)
 
     @property
     def regularizable(self):
         assert not hasattr(super(), 'regularizable')
-
+        params = []
         if hasattr(self, 'weight'):
-            return tuple([self.weight])
-        else:
-            r = [m.regularizable for m in self.children() if hasattr(m, 'regularizable')]
-            return tuple(r)
+            params += [self.weight]
+
+        for m in list(self.children()):
+            params.extend(m.regularizable)
+
+        return tuple(params)
 
     def save(self, param_file):
         assert not hasattr(super(), 'save')
@@ -90,20 +99,6 @@ class Sequential(nn.Sequential, _NetMethod):
 
         layers = list(self.children())
         return layers[-1].output_shape if layers else self.input_shape
-
-    @property
-    def trainable(self):
-        trainable = []
-        for m in list(self.children()):
-            trainable.extend(m.trainable)
-        return tuple(trainable)
-
-    @property
-    def regularizable(self):
-        regularizable = []
-        for m in list(self.children()):
-            regularizable.extend(m.regularizable)
-        return tuple(regularizable)
 
     def reset_parameters(self):
         for m in self.children():
@@ -189,10 +184,8 @@ class Lambda(Module):
 class Conv2d(nn.Conv2d, _NetMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
                  bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
-        assert isinstance(input_shape, list) or isinstance(input_shape,
-                                                           tuple), 'input_shape must be list or tuple, got %s' % type(
-            input_shape)
         assert len(input_shape) == 4, 'input_shape must have 4 elements, got %d' % len(input_shape)
+        assert input_shape[1] is not None, 'Shape at dimension 1 (zero-based index) must be known'
         assert isinstance(out_channels, int) and isinstance(kernel_size, (int, list, tuple))
         assert isinstance(padding, (int, list, tuple,
                                     str)), 'border_mode should be either \'int\', ' '\'list\', \'tuple\' or \'str\', got {}'.format(
@@ -266,7 +259,7 @@ class Conv2d(nn.Conv2d, _NetMethod):
 class FC(nn.Linear, _NetMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
                  flatten=False, keepdim=False, **kwargs):
-        assert None not in input_shape[1:], 'Shape of input must be known for FC layer'
+        assert input_shape[-1] is not None, 'Shape at the last position (zero-based index) must be known'
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
@@ -377,7 +370,7 @@ class ResNetBasicBlock(Sequential):
     expansion = 1
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, weights_init=None, bias_init=None, norm_method='bn', **kwargs):
+                 block=None, weights_init=None, norm_method='bn', **kwargs):
         super().__init__(input_shape)
         self.input_shape = input_shape
         self.out_channels = out_channels
@@ -386,7 +379,6 @@ class ResNetBasicBlock(Sequential):
         self.activation = utils.function[activation]
         self.groups = groups
         self.weights_init = weights_init
-        self.bias_init = bias_init
         self.norm_method = norm_method
         self.kwargs = kwargs
 
@@ -396,7 +388,7 @@ class ResNetBasicBlock(Sequential):
                 self.downsample = downsample
             else:
                 self.downsample = ConvNormAct(input_shape, out_channels * self.expansion, 1, stride=stride, bias=False,
-                                              weights_init=weights_init, bias_init=bias_init, activation='linear')
+                                              weights_init=weights_init, activation='linear')
             self.add_module('downsample', self.downsample)
         else:
             if downsample:
@@ -413,17 +405,16 @@ class ResNetBasicBlock(Sequential):
         if self.expansion != 1:
             block.add_module('pre',
                              ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
-                                         weights_init=self.weights_init, bias_init=self.bias_init, groups=self.groups))
+                                         weights_init=self.weights_init, groups=self.groups))
         block.add_module('conv_norm_act_1',
                          ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
-                                     weights_init=self.weights_init, bias_init=self.bias_init,
-                                     stride=self.stride, activation=self.activation, groups=self.groups,
-                                     norm_method=self.norm_method, **self.kwargs))
+                                     weights_init=self.weights_init, stride=self.stride, activation=self.activation,
+                                     groups=self.groups, norm_method=self.norm_method, **self.kwargs))
         block.add_module('conv_norm_act_2',
                          ConvNormAct(block.output_shape, self.out_channels * self.expansion,
                                      1 if self.expansion != 1 else self.kernel_size, bias=False, stride=1,
                                      activation=None, groups=self.groups, weights_init=self.weights_init,
-                                     norm_method=self.norm_method, bias_init=self.bias_init, **self.kwargs))
+                                     norm_method=self.norm_method, **self.kwargs))
         return block
 
     def forward(self, input):
@@ -442,9 +433,9 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
     expansion = 4
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, weights_init=None, bias_init=None, norm_method='bn', **kwargs):
+                 block=None, weights_init=None, norm_method='bn', **kwargs):
         super().__init__(input_shape, out_channels, kernel_size, stride, activation, downsample, groups, block=block,
-                         weights_init=weights_init, bias_init=bias_init, norm_method=norm_method, **kwargs)
+                         weights_init=weights_init, norm_method=norm_method, **kwargs)
 
     def __repr__(self):
         string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={})'.format(

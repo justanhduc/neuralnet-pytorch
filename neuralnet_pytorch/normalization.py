@@ -9,6 +9,8 @@ __all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d']
 class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
         self.input_shape = input_shape
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
@@ -36,6 +38,8 @@ class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
 class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
         self.input_shape = input_shape
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
@@ -64,6 +68,8 @@ class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
 
 class LayerNorm(nn.LayerNorm, _NetMethod):
     def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, **kwargs):
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
         self.input_shape = input_shape
         super().__init__(input_shape[1:], eps, elementwise_affine)
@@ -76,6 +82,8 @@ class LayerNorm(nn.LayerNorm, _NetMethod):
 
 class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
         self.input_shape = input_shape
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
         if cuda_available:
