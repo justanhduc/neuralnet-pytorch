@@ -332,6 +332,43 @@ def smooth(x, beta=.9, window='hanning'):
     return y if y.shape[0] == x.shape[0] else y[(window_len // 2 - 1):-(window_len // 2)]
 
 
+def batch_pairwise_dist(x, y):
+    bs, num_points_x, points_dim = x.size()
+    _, num_points_y, _ = y.size()
+    xx = T.bmm(x, x.transpose(2, 1))
+    yy = T.bmm(y, y.transpose(2, 1))
+    zz = T.bmm(x, y.transpose(2, 1))
+
+    if cuda_available:
+        dtype = T.cuda.LongTensor
+    else:
+        dtype = T.LongTensor
+
+    diag_ind_x = T.arange(0, num_points_x).type(dtype)
+    diag_ind_y = T.arange(0, num_points_y).type(dtype)
+    # brk()
+    rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
+    ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
+    P = (rx.transpose(2, 1) + ry - 2 * zz)
+    return P
+
+
+def time_cuda_module(f, *args, **kwargs):
+    start = T.cuda.Event(enable_timing=True)
+    end = T.cuda.Event(enable_timing=True)
+
+    start.record()
+    f(*args, **kwargs)
+    end.record()
+
+    # Waits for everything to finish running
+    T.cuda.synchronize()
+
+    total = start.elapsed_time(end)
+    print('Took %fs' % total)
+    return total
+
+
 function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
             'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: T.tanh(x),
             'sigmoid': lambda x, **kwargs: T.sigmoid(x), 'elu': lambda x, **kwargs: F.elu(x, **kwargs),
