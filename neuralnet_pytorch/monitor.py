@@ -127,10 +127,24 @@ class Monitor:
             self.current_folder = current_folder
             try:
                 log = self.read_log('log.pkl')
-                self.set_num_stats(log['num'])
-                self.set_hist_stats(log['hist'])
-            except (FileNotFoundError, KeyError):
-                print('\'log.pkl\' not found in \'%s\' or no stats recorded' % self.current_folder)
+                try:
+                    self.set_num_stats(log['num'])
+                except KeyError:
+                    print('No record found for \'num\'')
+
+                try:
+                    self.set_hist_stats(log['hist'])
+                except KeyError:
+                    print('No record found for \'hist\'')
+
+                try:
+                    self.set_options(log['options'])
+                except KeyError:
+                    print('No record found for \'options\'')
+
+            except FileNotFoundError:
+                print('\'log.pkl\' not found in \'%s\'' % self.current_folder)
+
         else:
             self.path = os.path.join(root, model_name)
             os.makedirs(self.path, exist_ok=True)
@@ -185,6 +199,12 @@ class Monitor:
 
     def set_hist_stats(self, stats_dict):
         self._hist_since_beginning.update(stats_dict)
+
+    def set_options(self, options_dict):
+        self._options.update(options_dict)
+
+    def set_option(self, name, option, value):
+        self._options[name][option] = value
 
     def _atexit(self):
         self._flush()
@@ -360,8 +380,8 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning)},
-                     f, pkl.HIGHEST_PROTOCOL)
+            pkl.dump({'iter': it, 'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning),
+                      'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
                                                                 (it % self.num_iters) / self.num_iters * 100.,
