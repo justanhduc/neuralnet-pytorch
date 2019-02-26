@@ -376,7 +376,7 @@ class Monitor:
                     ax = fig.add_subplot(111, projection='3d')
                     ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
                     plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
-            fig.clear()
+                    fig.clear()
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
