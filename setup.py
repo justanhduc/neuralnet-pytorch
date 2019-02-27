@@ -40,6 +40,8 @@ def setup_package():
             'Operating System :: POSIX :: Linux',
             'Programming Language :: Python :: 3 :: Only',
             'Programming Language :: Python :: 3.5'
+            'Programming Language :: Python :: 3.6'
+            'Programming Language :: Python :: 3.7'
         ],
         platforms=['Linux'],
         packages=find_packages(exclude=['examples']),
