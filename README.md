@@ -85,4 +85,6 @@ All PRs are welcome.
 
 The CUDA Chamfer distance is taken from the [AtlasNet](https://github.com/ThibaultGROUEIX/AtlasNet) repo.
 
+The EMD loss is taken from [this Pytorch wrapper](https://gist.github.com/pclucas14/826c129aea315b02cbde0ec23ceb1068).
+
 The AdaBound optimizer is taken from its [official repo](https://github.com/Luolc/AdaBound). 

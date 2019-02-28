@@ -3,8 +3,9 @@ import torch.nn.functional as F
 import numpy as np
 
 from neuralnet_pytorch import utils
+from neuralnet_pytorch.extensions.dist_emd import emd
 
-__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss']
+__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'emd_loss']
 
 
 def huber_loss(x, y, reduction='mean'):
@@ -98,6 +99,14 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
     loss_2 = T.sum(dist2)
     loss_1 = T.sum(dist1)
     return (T.mean(loss_1) + T.mean(loss_2)) if reduce == 'mean' else (T.sum(loss_1) + T.sum(loss_2))
+
+
+def emd_loss(xyz1, xyz2, reduce='mean'):
+    assert len(xyz1.shape) == len(xyz2.shape) == 3, 'Inputs should have 3 dimensions'
+    assert reduce in ('mean', 'sum'), 'Reduce method should be mean or sum'
+
+    emd_dist = emd(xyz1, xyz2) + emd(xyz2, xyz1)
+    return T.mean(emd_dist) if reduce == 'mean' else T.sum(emd_dist)
 
 
 def _fspecial_gauss(size, sigma):

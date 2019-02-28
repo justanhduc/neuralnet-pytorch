@@ -51,6 +51,7 @@ def setup_package():
                 'neuralnet_pytorch/extensions/chamfer.cu',
             ]),
         ],
+        dependency_links=['https://github.com/szagoruyko/pyinn'],
         cmdclass={
             'build_ext': BuildExtension
         },
