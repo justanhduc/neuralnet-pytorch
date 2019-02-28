@@ -309,7 +309,7 @@ class Monitor:
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if self.use_visdom:
                 self.vis.matplot(fig, win=name)
-        fig.clear()
+            fig.clear()
 
         # save recorded images
         for name, vals in list(_img_since_last_flush.items()):
