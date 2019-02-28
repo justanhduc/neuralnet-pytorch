@@ -34,7 +34,7 @@ model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', 
 which frees you from doing a lot of manual calculations when adding one layer on top of another. Theano folks will also
 find some reminiscence as many functions are highly inspired by Theano. 
 
-## Requirements
+# Requirements
 
 [Pytorch](http://deeplearning.net/software/theano/)
 
@@ -48,7 +48,7 @@ find some reminiscence as many functions are highly inspired by Theano.
 
 [TensorboardX](https://github.com/lanpa/tensorboardX)
 
-## Installation
+# Installation
 
 Stable version
 ```
@@ -67,16 +67,22 @@ For some ops, Cuda/C++ implementations are available. To install the version wit
 pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@linux
 ```
 
-## Usages
+# Usages
 
 ...
-## TODO
+# TODO
 
 - [x] Adding introduction and installation 
 - [ ] Writing documentations
 - [ ] Adding examples
 
-## Disclaimer
+# Disclaimer
 
 Most but not all the written modules are properly checked. No replacements or refunds for buggy performance. 
 All PRs are welcome. 
+
+# Acknowledgements
+
+The CUDA Chamfer distance is taken from the [AtlasNet](https://github.com/ThibaultGROUEIX/AtlasNet) repo.
+
+The AdaBound optimizer is taken from its [official repo](https://github.com/Luolc/AdaBound). 
