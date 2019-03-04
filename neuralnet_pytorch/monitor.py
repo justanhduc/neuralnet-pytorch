@@ -240,10 +240,7 @@ class Monitor:
     def tick(self):
         self._iter += 1
 
-    def plot(self, name, value, smoothness=None):
-        if self._iter == 0:
-            self._options[name]['smoothness'] = smoothness
-
+    def plot(self, name, value):
         self._num_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
@@ -281,11 +278,6 @@ class Monitor:
             if isinstance(y_vals[0], dict):
                 keys = list(y_vals[0].keys())
                 y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
-                if self._options[name]['smoothness']:
-                    y_vals = [
-                        utils.smooth(y_val, self._options[name]['smoothness'], self.kwargs.pop('window', 'hanning')) for
-                        y_val in y_vals]
-
                 plot = plt.plot(x_vals, y_vals)
                 plt.legend(plot, keys)
                 prints.append(
@@ -299,9 +291,6 @@ class Monitor:
                                                                                               min_,
                                                                                               x_vals[argmin_],
                                                                                               med_))
-                if self._options[name]['smoothness']:
-                    y_vals = utils.smooth(y_vals, self._options[name]['smoothness'],
-                                          self.kwargs.pop('window', 'hanning'))
 
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
