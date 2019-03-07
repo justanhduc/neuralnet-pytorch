@@ -68,6 +68,7 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
     :return: the Chamfer distance between the two point clouds
     """
     assert reduce in ('mean', 'sum'), 'Unknown reduce method'
+    reduce = T.sum if reduce == 'sum' else T.mean
 
     def batch_pairwise_dist(x, y):
         bs, num_points_x, points_dim = x.size()
@@ -96,9 +97,9 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
         P = batch_pairwise_dist(xyz1, xyz2)
         dist2, _ = T.min(P, 1)
         dist1, _ = T.min(P, 2)
-    loss_2 = T.sum(dist2)
-    loss_1 = T.sum(dist1)
-    return (T.mean(loss_1) + T.mean(loss_2)) if reduce == 'mean' else (T.sum(loss_1) + T.sum(loss_2))
+    loss_2 = reduce(dist2)
+    loss_1 = reduce(dist1)
+    return loss_1 + loss_2
 
 
 def emd_loss(xyz1, xyz2, reduce='mean'):
