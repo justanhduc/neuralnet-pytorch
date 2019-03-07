@@ -284,13 +284,10 @@ class Monitor:
                     "{}\t{:.5f}".format(name,
                                         np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
             else:
-                max_, min_, med_ = np.max(y_vals), np.min(y_vals), np.median(y_vals)
+                max_, min_, med_, mean_ = np.max(y_vals), np.min(y_vals), np.median(y_vals), np.mean(y_vals)
                 argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
-                plt.title(
-                    'max: {:.4f} at iter {} \nmin: {:.4f} at iter {} \nmedian: {:.4f}'.format(max_, x_vals[argmax_],
-                                                                                              min_,
-                                                                                              x_vals[argmin_],
-                                                                                              med_))
+                plt.title('max: {:.8f} at iter {} \nmin: {:.8f} at iter {} \nmedian: {:.8f} '
+                          '\nmean: {:.8f}'.format(max_, x_vals[argmax_], min_, x_vals[argmin_], med_, mean_))
 
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
