@@ -206,6 +206,12 @@ class Monitor:
     def set_option(self, name, option, value):
         self._options[name][option] = value
 
+    def clear_num_stats(self, key):
+        self._num_since_beginning[key].clear()
+
+    def clear_hist_stats(self, key):
+        self._hist_since_beginning[key].clear()
+
     def _atexit(self):
         self._flush()
         plt.close()
