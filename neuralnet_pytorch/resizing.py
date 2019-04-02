@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, Module, cuda_available
+from neuralnet_pytorch.layers import _NetMethod, Module, cuda_available, MultiInputModule
 
 __all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D']
 
@@ -129,18 +129,19 @@ class GlobalAvgPool2D(Module):
         return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
-class Cat(Module):
-    def __init__(self, input_shapes, dim=1):
-        super().__init__(input_shapes)
+class Cat(MultiInputModule):
+    def __init__(self, dim=1, *modules):
+        super().__init__(*modules)
         self.dim = dim
 
-    def forward(self, *input):
-        return T.cat(input, dim=self.dim)
+    def forward(self, input):
+        outputs = super().forward(input)
+        return T.cat(outputs, dim=self.dim)
 
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
+        if None in self.input_shape:
             return None
 
         shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]

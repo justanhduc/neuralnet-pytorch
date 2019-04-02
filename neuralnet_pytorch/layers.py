@@ -14,7 +14,7 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
-           'GraphConv']
+           'GraphConv', 'MultiInputModule']
 
 
 class _NetMethod:
@@ -84,6 +84,24 @@ class Module(nn.Module, _NetMethod):
 
     def __repr__(self):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
+
+
+class MultiInputModule(nn.Module, _NetMethod):
+    def __init__(self, *modules):
+        super().__init__()
+
+        self.input_shape = []
+        for idx, module in enumerate(modules):
+            self.add_module('module%d' % idx, module)
+            self.input_shape.append(module.output_shape)
+        self.input_shape = tuple(self.input_shape)
+
+    def forward(self, input):
+        outputs = []
+        for module in list(self.children()):
+            outputs.append(module(input))
+
+        return outputs
 
 
 class Sequential(nn.Sequential, _NetMethod):
@@ -538,17 +556,18 @@ class StackingConv(Sequential):
         return string
 
 
-class Sum(Module):
-    def __init__(self, input_shapes):
-        super().__init__(input_shapes)
+class Sum(MultiInputModule):
+    def __init__(self, *module):
+        super().__init__(*module)
 
-    def forward(self, *input):
-        return sum(input)
+    def forward(self, input):
+        outputs = super().forward(input)
+        return sum(outputs)
 
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
+        if None in self.input_shape:
             return None
 
         return tuple(self.input_shape[0])
