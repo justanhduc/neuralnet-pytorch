@@ -1,10 +1,11 @@
+import torch as T
 import torch.nn as nn
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod
+from neuralnet_pytorch.layers import _NetMethod, MultiMultiInputModule, MultiSingleInputModule
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d']
+__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiInputAdaIN']
 
 
 class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
@@ -92,3 +93,52 @@ class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
 
     def __repr__(self):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
+
+
+class AdaIN(MultiSingleInputModule):
+    '''
+    Adaptive Instance Normalization
+    out1 = module1(input)
+    out2 = module2(input)
+    out = std(out2) * (out1 - mean(out1)) / std(out1) + mean(out2)
+    '''
+    def __init__(self, module1, module2, dim1=1, dim2=1):
+        super().__init__(module1, module2)
+        self.dim1 = dim1
+        self.dim2 = dim2
+
+    def forward(self, input):
+        out1, out2 = super().forward(input)
+        mean1, std1 = T.mean(out1, self.dim1, keepdim=True), T.sqrt(T.var(out1, self.dim1, keepdim=True) + 1e-8)
+        mean2, std2 = T.mean(out2, self.dim2, keepdim=True), T.sqrt(T.var(out2, self.dim2, keepdim=True) + 1e-8)
+        return std2 * (out1 - mean1) / std1 + mean2
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.input_shape[0]
+
+
+class MultiInputAdaIN(MultiMultiInputModule):
+    '''
+    Adaptive Instance Normalization
+    out1 = module1(input1)
+    out2 = module2(input2)
+    out = std(out2) * (out1 - mean(out1)) / std(out1) + mean(out2)
+    '''
+
+    def __init__(self, module1, module2, dim1=1, dim2=1):
+        super().__init__(module1, module2)
+        self.dim1 = dim1
+        self.dim2 = dim2
+
+    def forward(self, *input):
+        out1, out2 = super().forward(*input)
+        mean1, std1 = T.mean(out1, self.dim1, keepdim=True), T.sqrt(T.var(out1, self.dim1, keepdim=True) + 1e-8)
+        mean2, std2 = T.mean(out2, self.dim2, keepdim=True), T.sqrt(T.var(out2, self.dim2, keepdim=True) + 1e-8)
+        return std2 * (out1 - mean1) / std1 + mean2
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.input_shape[0]

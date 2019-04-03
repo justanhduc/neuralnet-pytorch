@@ -4,10 +4,11 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, Module, MultiSingleInputModule
+from neuralnet_pytorch.layers import _NetMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D']
+__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle',
+           'GlobalAvgPool2D', 'ConcurrentCat', 'SequentialCat']
 
 
 class UpsamplingLayer(nn.Upsample, _NetMethod):
@@ -137,6 +138,45 @@ class Cat(MultiSingleInputModule):
 
     def forward(self, input):
         outputs = super().forward(input)
+        return T.cat(outputs, dim=self.dim)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if None in self.input_shape:
+            return None
+
+        shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]
+        depth = sum([shape_nan[i][self.dim] for i in range(len(self.input_shape))])
+        shape = list(shape_nan[0])
+        shape[self.dim] = depth
+        return tuple(shape)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}, dim={}) -> {}'.format(self.input_shape, self.dim, self.output_shape)
+
+
+class SequentialCat(Cat):
+    def __init__(self, dim=1, *modules):
+        super().__init__(dim, *modules)
+
+    def forward(self, input):
+        outputs = []
+        output = input
+        for module in self.children():
+            output = module(output)
+            outputs.append(output)
+
+        return T.cat(outputs, dim=self.dim)
+
+
+class ConcurrentCat(MultiMultiInputModule):
+    def __init__(self, dim=1, *modules):
+        super().__init__(*modules)
+        self.dim = dim
+
+    def forward(self, *input):
+        outputs = super().forward(*input)
         return T.cat(outputs, dim=self.dim)
 
     @property

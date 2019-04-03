@@ -14,7 +14,7 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
-           'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule']
+           'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum']
 
 
 class _NetMethod:
@@ -577,8 +577,42 @@ class StackingConv(Sequential):
 
 
 class Sum(MultiSingleInputModule):
-    def __init__(self, *module):
-        super().__init__(*module)
+    def __init__(self, *modules):
+        super().__init__(*modules)
+
+    def forward(self, input):
+        outputs = super().forward(input)
+        return sum(outputs)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if None in self.input_shape:
+            return None
+
+        return tuple(self.input_shape[0])
+
+    def __repr__(self):
+        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
+
+
+class SequentialSum(Sum):
+    def __init__(self, *modules):
+        super().__init__(*modules)
+
+    def forward(self, input):
+        outputs = []
+        output = input
+        for module in self.children():
+            output = module(output)
+            outputs.append(output)
+
+        return sum(outputs)
+
+
+class ConcurrentSum(MultiMultiInputModule):
+    def __init__(self, *modules):
+        super().__init__(*modules)
 
     def forward(self, input):
         outputs = super().forward(input)
