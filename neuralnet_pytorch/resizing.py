@@ -4,7 +4,8 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, Module, cuda_available, MultiInputModule
+from neuralnet_pytorch.layers import _NetMethod, Module, MultiSingleInputModule
+from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D']
 
@@ -129,7 +130,7 @@ class GlobalAvgPool2D(Module):
         return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
-class Cat(MultiInputModule):
+class Cat(MultiSingleInputModule):
     def __init__(self, dim=1, *modules):
         super().__init__(*modules)
         self.dim = dim

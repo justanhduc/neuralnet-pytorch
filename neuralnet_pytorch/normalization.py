@@ -1,7 +1,8 @@
 import torch.nn as nn
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, cuda_available
+from neuralnet_pytorch.layers import _NetMethod
+from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d']
 
