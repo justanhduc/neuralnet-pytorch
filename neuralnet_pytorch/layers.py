@@ -14,7 +14,7 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
-           'GraphConv', 'MultiInputModule']
+           'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule']
 
 
 class _NetMethod:
@@ -86,7 +86,7 @@ class Module(nn.Module, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class MultiInputModule(nn.Module, _NetMethod):
+class MultiSingleInputModule(nn.Module, _NetMethod):
     def __init__(self, *modules):
         super().__init__()
 
@@ -97,11 +97,31 @@ class MultiInputModule(nn.Module, _NetMethod):
         self.input_shape = tuple(self.input_shape)
 
     def forward(self, input):
-        outputs = []
-        for module in list(self.children()):
-            outputs.append(module(input))
+        outputs = [module(input) for module in self.children()]
+        return tuple(outputs)
 
-        return outputs
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
+
+
+class MultiMultiInputModule(nn.Module, _NetMethod):
+    def __init__(self, *modules):
+        super().__init__()
+
+        self.input_shape = []
+        for idx, module in enumerate(modules):
+            self.add_module('module%d' % idx, module)
+            self.input_shape.append(module.output_shape)
+        self.input_shape = tuple(self.input_shape)
+
+    def forward(self, *input):
+        assert len(input) == len(list(self.children())), 'Number of inputs must be equal to number of modules'
+
+        outputs = [module(inp) for module, inp in zip(self.children(), input)]
+        return tuple(outputs)
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
 class Sequential(nn.Sequential, _NetMethod):
@@ -556,7 +576,7 @@ class StackingConv(Sequential):
         return string
 
 
-class Sum(MultiInputModule):
+class Sum(MultiSingleInputModule):
     def __init__(self, *module):
         super().__init__(*module)
 
