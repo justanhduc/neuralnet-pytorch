@@ -296,7 +296,7 @@ class Conv2d(nn.Conv2d, _NetMethod):
 
 class FC(nn.Linear, _NetMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
-                 flatten=False, keepdim=False, **kwargs):
+                 flatten=False, keepdim=True, **kwargs):
         assert input_shape[-1] is not None, 'Shape at the last position (zero-based index) must be known'
         self.input_shape = input_shape
         self.weights_init = weights_init
@@ -317,7 +317,7 @@ class FC(nn.Linear, _NetMethod):
             input = T.flatten(input, 1)
 
         output = self.activation(super().forward(input), **self.kwargs)
-        return output.flatten() if self.out_features == 1 and not self.keepdim else output
+        return output.flatten(-2) if self.out_features == 1 and not self.keepdim else output
 
     @property
     @utils.validate
