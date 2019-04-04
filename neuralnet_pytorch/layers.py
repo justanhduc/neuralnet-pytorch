@@ -34,11 +34,7 @@ class _NetMethod:
         assert not hasattr(super(), 'trainable')
         params = []
         if hasattr(self, 'parameters'):
-            params = [p for p in self.parameters(recurse=False) if p.requires_grad]
-
-        for m in list(self.children()):
-            params.extend(m.trainable)
-
+            params = [p for p in self.parameters() if p.requires_grad]
         return tuple(params)
 
     @property
@@ -49,7 +45,8 @@ class _NetMethod:
             params += [self.weight]
 
         for m in list(self.children()):
-            params.extend(m.regularizable)
+            if hasattr(m, 'regularizable'):
+                params.extend(m.regularizable)
 
         return tuple(params)
 
