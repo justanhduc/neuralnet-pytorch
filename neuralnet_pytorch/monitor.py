@@ -144,6 +144,11 @@ class Monitor:
                 except KeyError:
                     print('No record found for \'options\'')
 
+                try:
+                    self.set_iter(log['iter'])
+                except KeyError:
+                    print('No record found for \'iter\'')
+
             except FileNotFoundError:
                 print('\'log.pkl\' not found in \'%s\'' % self.current_folder)
 
