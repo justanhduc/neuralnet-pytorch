@@ -103,7 +103,7 @@ class Monitor:
         :param root: path to store the collected statistics
         :param current_folder: if given, all the stats in here will be overwritten or resumed
         :param print_freq: statistics display frequency
-        :param num_iters: if given, training iteration percentage will be displayed along with epoch no
+        :param num_iters: number of iterations/epoch. if given, training iteration percentage will be displayed along with epoch no
         :param use_visdom: whether to use Visdom for real-time monitoring
         :param use_tensorboard: whether to use Tensorboard for real-time monitoring
         :param kwargs: some miscellaneous options for Visdom and other functions
@@ -117,6 +117,8 @@ class Monitor:
         self._pointcloud_since_last_flush = collections.defaultdict(spawn_defaultdict)
         self._options = collections.defaultdict(spawn_defaultdict)
         self._dump_files = collections.OrderedDict()
+        self._schedule = {'beginning': collections.defaultdict(spawn_defaultdict),
+                          'end': collections.defaultdict(spawn_defaultdict)}
         self._timer = time.time()
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
@@ -232,9 +234,17 @@ class Monitor:
         self.dump_rep('network.txt', network)
 
     def __enter__(self):
-        pass
+        if self.num_iters:
+            if self._iter % self.num_iters == 0:
+                for func_dict in self._schedule['beginning'].values():
+                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.num_iters:
+            if self._iter % self.num_iters == 0:
+                for func_dict in self._schedule['end'].values():
+                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+
         if self.print_freq:
             if self._iter % self.print_freq == 0:
                 self._flush()
@@ -267,6 +277,15 @@ class Monitor:
         self._hist_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
+
+    def schedule(self, name, func, beginning=True, *args, **kwargs):
+        assert name is not None , 'name and func must be provided'
+        assert callable(func), 'func must be callable'
+
+        when = 'beginning' if beginning else 'end'
+        self._schedule[when][name]['func'] = func
+        self._schedule[when][name]['args'] = args
+        self._schedule[when][name]['kwargs'] = kwargs
 
     def _worker(self, it, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
                 _pointcloud_since_last_flush):
@@ -372,7 +391,9 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'num': dict(self._num_since_beginning), 'hist': dict(self._hist_since_beginning),
+            pkl.dump({'iter': it,
+                      'num': dict(self._num_since_beginning),
+                      'hist': dict(self._hist_since_beginning),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
