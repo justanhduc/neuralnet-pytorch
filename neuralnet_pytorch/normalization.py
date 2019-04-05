@@ -5,7 +5,8 @@ from neuralnet_pytorch import utils
 from neuralnet_pytorch.layers import _NetMethod, MultiMultiInputModule, MultiSingleInputModule
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiInputAdaIN']
+__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiInputAdaIN',
+           'FeatureNorm1d']
 
 
 class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
@@ -24,9 +25,12 @@ class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
             nn.init.constant_(self.weight, 1.)
             self.weight.requires_grad_(False)
 
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
+
     def forward(self, input):
-        input = self.activation(super().forward(input), **self.kwargs)
-        return input
+        output = self.activation(super().forward(input), **self.kwargs)
+        return output
 
     def reset(self):
         super().reset_parameters()
@@ -56,8 +60,8 @@ class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input):
-        input = self.activation(super().forward(input), **self.kwargs)
-        return input
+        output = self.activation(super().forward(input), **self.kwargs)
+        return output
 
     def reset(self):
         super().reset_parameters()
@@ -75,6 +79,7 @@ class LayerNorm(nn.LayerNorm, _NetMethod):
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
         self.input_shape = input_shape
         super().__init__(input_shape[1:], eps, elementwise_affine)
+
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
@@ -88,6 +93,7 @@ class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
             input_shape)
         self.input_shape = input_shape
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
+
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
@@ -142,3 +148,38 @@ class MultiInputAdaIN(MultiMultiInputModule):
     @utils.validate
     def output_shape(self):
         return self.input_shape[0]
+
+
+class FeatureNorm1d(nn.BatchNorm1d, _NetMethod):
+    def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
+                 no_scale=False, **kwargs):
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
+        assert len(input_shape) == 3, 'Only input of 3 dimensions is supported'
+        self.input_shape = input_shape
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else lambda x, **kwargs: activation(x)
+        self.no_scale = no_scale
+        self.kwargs = kwargs
+
+        super().__init__(input_shape[-1], eps, momentum, affine, track_running_stats)
+        if self.no_scale:
+            nn.init.constant_(self.weight, 1.)
+            self.weight.requires_grad_(False)
+
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
+
+    def forward(self, input):
+        input = input.transpose(1, 2)
+        output = self.activation(super().forward(input), **self.kwargs)
+        output = output.transpose(1, 2)
+        return output
+
+    def reset(self):
+        super().reset_parameters()
+        if self.no_scale:
+            nn.init.constant_(self.weight, 1.)
+
+    def __repr__(self):
+        return super().__repr__() + ' -> {}'.format(self.output_shape)
