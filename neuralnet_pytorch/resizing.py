@@ -4,14 +4,14 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, Module, MultiSingleInputModule, MultiMultiInputModule
+from neuralnet_pytorch.layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle',
            'GlobalAvgPool2D', 'ConcurrentCat', 'SequentialCat']
 
 
-class UpsamplingLayer(nn.Upsample, _NetMethod):
+class UpsamplingLayer(nn.Upsample, _LayerMethod):
     def __init__(self, input_shape, size=None, scale_factor=None, mode='bilinear', align_corners=True, **kwargs):
         assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
                                                              'Received %s.' % type(scale_factor)
@@ -38,7 +38,7 @@ class UpsamplingLayer(nn.Upsample, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class AvgPool2d(nn.AvgPool2d, _NetMethod):
+class AvgPool2d(nn.AvgPool2d, _LayerMethod):
     def __init__(self, input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False):
         self.input_shape = input_shape
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
@@ -72,7 +72,7 @@ class AvgPool2d(nn.AvgPool2d, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class MaxPool2d(nn.MaxPool2d, _NetMethod):
+class MaxPool2d(nn.MaxPool2d, _LayerMethod):
     def __init__(self, input_shape, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
                  ceil_mode=False):
         self.input_shape = input_shape

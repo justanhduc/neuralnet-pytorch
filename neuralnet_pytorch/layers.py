@@ -14,10 +14,26 @@ from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
-           'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum']
+           'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum',
+           'Net']
 
 
-class _NetMethod:
+class Net:
+    def __init__(self, *args, **kwargs):
+        self.optimizer = None
+        self.scheduler = None
+
+    def loss(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def learn(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def eval_loss(self, *args, **kwargs):
+        raise NotImplementedError
+
+
+class _LayerMethod:
     @property
     @utils.validate
     def output_shape(self):
@@ -74,7 +90,7 @@ class _NetMethod:
         pass
 
 
-class Module(nn.Module, _NetMethod):
+class Module(nn.Module, _LayerMethod):
     def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
@@ -83,7 +99,7 @@ class Module(nn.Module, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class MultiSingleInputModule(nn.Module, _NetMethod):
+class MultiSingleInputModule(nn.Module, _LayerMethod):
     def __init__(self, *modules):
         super().__init__()
 
@@ -101,7 +117,7 @@ class MultiSingleInputModule(nn.Module, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class MultiMultiInputModule(nn.Module, _NetMethod):
+class MultiMultiInputModule(nn.Module, _LayerMethod):
     def __init__(self, *modules):
         super().__init__()
 
@@ -121,7 +137,7 @@ class MultiMultiInputModule(nn.Module, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class Sequential(nn.Sequential, _NetMethod):
+class Sequential(nn.Sequential, _LayerMethod):
     def __init__(self, input_shape=None, *args):
         super().__init__(*args)
         self.input_shape = input_shape
@@ -144,7 +160,7 @@ class Sequential(nn.Sequential, _NetMethod):
 
 
 def Wrapper(input_shape, layer, *args, **kwargs):
-    class _Wrapper(layer, _NetMethod):
+    class _Wrapper(layer, _LayerMethod):
         def __init__(self):
             self.output_shape_tmp = kwargs.pop('output_shape', None)
             device = kwargs.pop('device', None)
@@ -216,7 +232,7 @@ class Lambda(Module):
         return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
 
 
-class Conv2d(nn.Conv2d, _NetMethod):
+class Conv2d(nn.Conv2d, _LayerMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
                  bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
         assert len(input_shape) == 4, 'input_shape must have 4 elements, got %d' % len(input_shape)
@@ -291,7 +307,7 @@ class Conv2d(nn.Conv2d, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class FC(nn.Linear, _NetMethod):
+class FC(nn.Linear, _LayerMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
                  flatten=False, keepdim=True, **kwargs):
         assert input_shape[-1] is not None, 'Shape at the last position (zero-based index) must be known'
@@ -478,7 +494,7 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
         return string
 
 
-class ConvTranspose2d(nn.ConvTranspose2d, _NetMethod):
+class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
                  dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple. Received %s.' % type(
