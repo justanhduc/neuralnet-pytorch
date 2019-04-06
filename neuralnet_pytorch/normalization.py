@@ -2,14 +2,14 @@ import torch as T
 import torch.nn as nn
 
 from neuralnet_pytorch import utils
-from neuralnet_pytorch.layers import _NetMethod, MultiMultiInputModule, MultiSingleInputModule
+from neuralnet_pytorch.layers import _LayerMethod, MultiMultiInputModule, MultiSingleInputModule
 from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiInputAdaIN',
            'FeatureNorm1d']
 
 
-class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
+class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
@@ -41,7 +41,7 @@ class BatchNorm1d(nn.BatchNorm1d, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
+class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
@@ -72,7 +72,7 @@ class BatchNorm2d(nn.BatchNorm2d, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class LayerNorm(nn.LayerNorm, _NetMethod):
+class LayerNorm(nn.LayerNorm, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
@@ -87,7 +87,7 @@ class LayerNorm(nn.LayerNorm, _NetMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-class InstanceNorm2d(nn.InstanceNorm2d, _NetMethod):
+class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
@@ -150,7 +150,7 @@ class MultiInputAdaIN(MultiMultiInputModule):
         return self.input_shape[0]
 
 
-class FeatureNorm1d(nn.BatchNorm1d, _NetMethod):
+class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(

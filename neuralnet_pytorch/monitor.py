@@ -26,6 +26,7 @@ import torch as T
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 
+import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
 
 __all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
@@ -124,6 +125,7 @@ class Monitor:
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
+        self.last_epoch = None
         self.print_freq = print_freq
         if current_folder:
             self.current_folder = current_folder
@@ -148,6 +150,11 @@ class Monitor:
                     self.set_iter(log['iter'])
                 except KeyError:
                     print('No record found for \'iter\'')
+
+                try:
+                    self.last_epoch = log['epoch']
+                except KeyError:
+                    print('No record found for \'epoch\'')
 
             except FileNotFoundError:
                 print('\'log.pkl\' not found in \'%s\'' % self.current_folder)
@@ -219,6 +226,80 @@ class Monitor:
     def clear_hist_stats(self, key):
         self._hist_since_beginning[key].clear()
 
+    def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=0,
+                     train_stats_func=None, val_stats_func=None, plot_lr=False):
+        assert isinstance(net, nnt.Net), 'net must be an instance of Net'
+        assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
+            'net must be an instance of Module or Sequential'
+
+        for epoch in range(start_epoch, n_epochs):
+            self.last_epoch = epoch
+            for func_dict in self._schedule['beginning'].values():
+                func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+
+            if plot_lr:
+                if net.scheduler:
+                    self.plot('lr', net.scheduler.optimizer.param_groups[0]['lr'])
+                else:
+                    self.plot('lr', net.optimizer.param_groups[0]['lr'])
+
+            for it, batch in enumerate(train_loader):
+                net.train(True)
+                with self:
+                    batch_cuda = list(batch)
+                    if nnt.cuda_available:
+                        for i in range(len(batch_cuda)):
+                            if not isinstance(batch_cuda[i], (list, tuple)):
+                                batch_cuda[i] = batch_cuda[i].cuda()
+                            else:
+                                batch_cuda[i] = list(batch_cuda[i])
+                                for ii in range(len(batch_cuda[i])):
+                                    batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
+
+                    loss_dict = net.learn(*batch_cuda)
+
+                    if train_stats_func is None:
+                        for k, v in loss_dict.items():
+                            if isinstance(v, T.Tensor):
+                                v = nnt.utils.to_numpy(v)
+
+                            if np.isnan(v) or np.isinf(v):
+                                raise ValueError('{} is NaN/inf. Training failed!'.format(k))
+
+                            self.plot(k, v)
+                    else:
+                        train_stats_func(loss_dict)
+
+                    if valid_freq:
+                        if it % valid_freq == 0:
+                            net.eval()
+
+                            with T.set_grad_enabled(False):
+                                eval_stats = []
+                                for itt, batch in enumerate(eval_loader):
+                                    batch_cuda = list(batch)
+                                    if nnt.cuda_available:
+                                        for i in range(len(batch_cuda)):
+                                            if not isinstance(batch_cuda[i], (list, tuple)):
+                                                batch_cuda[i] = batch_cuda[i].cuda()
+                                            else:
+                                                batch_cuda[i] = list(batch_cuda[i])
+                                                for ii in range(len(batch_cuda[i])):
+                                                    batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
+
+                                    eval_stats.append(net.eval_loss(*batch_cuda))
+
+                                if val_stats_func is not None:
+                                    val_stats_func(eval_stats)
+                                else:
+                                    keys = list(eval_stats[0].keys())
+                                    eval_stats = np.mean([list(stats.values()) for stats in eval_stats], 0)
+                                    for k, v in zip(keys, eval_stats):
+                                        self.plot(k, v)
+
+        for func_dict in self._schedule['end'].values():
+            func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+
     def _atexit(self):
         self._flush()
         plt.close()
@@ -239,17 +320,9 @@ class Monitor:
         self.dump_rep('network.txt', network)
 
     def __enter__(self):
-        if self.num_iters:
-            if self._iter % self.num_iters == 0:
-                for func_dict in self._schedule['beginning'].values():
-                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+        pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.num_iters:
-            if self._iter % self.num_iters == 0:
-                for func_dict in self._schedule['end'].values():
-                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
-
         if self.print_freq:
             if self._iter % self.print_freq == 0:
                 self._flush()
@@ -396,7 +469,7 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it,
+            pkl.dump({'iter': it, 'epoch': self.last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
