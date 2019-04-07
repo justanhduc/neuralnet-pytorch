@@ -32,7 +32,7 @@ model.add_module('conv1', nnt.Conv2d(model.output_shape, 20, 5, padding='half', 
 model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', activation='relu'))
 ```
 which frees you from doing a lot of manual calculations when adding one layer on top of another. Theano folks will also
-find some reminiscence as many functions are highly inspired by Theano. 
+find some reminiscence as many functions are highly inspired by Theano.  
 
 # Requirements
 
@@ -69,7 +69,8 @@ pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@linux
 
 # Usages
 
-...
+The manual reference is still under development and is available at https://neuralnet-pytorch.readthedocs.io.
+
 # TODO
 
 - [x] Adding introduction and installation 
@@ -78,7 +79,9 @@ pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@linux
 
 # Disclaimer
 
-Most but not all the written modules are properly checked. No replacements or refunds for buggy performance. 
+This package is a product from my little free time during my PhD, 
+so most but not all the written modules are properly checked. 
+No replacements or refunds for buggy performance. 
 All PRs are welcome. 
 
 # Acknowledgements
