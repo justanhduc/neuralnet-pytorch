@@ -9,6 +9,7 @@ import threading
 from queue import Queue
 from scipy.stats import truncnorm
 from PIL import Image
+from slackclient import SlackClient
 
 cuda_available = T.cuda.is_available()
 
@@ -367,6 +368,11 @@ def time_cuda_module(f, *args, **kwargs):
     total = start.elapsed_time(end)
     print('Took %fs' % total)
     return total
+
+
+def slack_message(username, message, channel, token, **kwargs):
+    sc = SlackClient(token)
+    sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
 
 
 function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
