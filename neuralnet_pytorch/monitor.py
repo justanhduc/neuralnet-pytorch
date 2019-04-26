@@ -96,7 +96,7 @@ def spawn_defaultdict():
 
 class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
-                 use_visdom=False, use_tensorboard=False, **kwargs):
+                 use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
         """Collects statistics and displays the results using various backends. The collected stats are stored in
         '<root>/<model_name>/run<#id>' where #id is automatically assigned each time an instance is constructed.
 
@@ -125,7 +125,7 @@ class Monitor:
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
-        self.last_epoch = None
+        self._last_epoch = None
         self.print_freq = print_freq
         if current_folder:
             self.current_folder = current_folder
@@ -152,7 +152,7 @@ class Monitor:
                     print('No record found for \'iter\'')
 
                 try:
-                    self.last_epoch = log['epoch']
+                    self._last_epoch = log['epoch']
                 except KeyError:
                     print('No record found for \'epoch\'')
 
@@ -196,6 +196,14 @@ class Monitor:
         self.thread.start()
 
         self.num_iters = num_iters
+
+        self.send_slack = send_slack
+        if send_slack:
+            self.username = kwargs.get('username', 'me')
+            self.channel = kwargs.get('channel', None)
+            self.token = kwargs.get('token', None)
+            assert self.channel is not None and self.token is not None, \
+                'channel and token must be provided to send a slack message'
         self.kwargs = kwargs
 
         atexit.register(self._atexit)
@@ -226,14 +234,17 @@ class Monitor:
     def clear_hist_stats(self, key):
         self._hist_since_beginning[key].clear()
 
+    def get_epoch(self):
+        return self._last_epoch
+
     def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=0,
-                     train_stats_func=None, val_stats_func=None, plot_lr=False):
+                     train_stats_func=None, val_stats_func=None, plot_lr=False, *args, **kwargs):
         assert isinstance(net, nnt.Net), 'net must be an instance of Net'
         assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
             'net must be an instance of Module or Sequential'
 
         for epoch in range(start_epoch, n_epochs):
-            self.last_epoch = epoch
+            self._last_epoch = epoch
             for func_dict in self._schedule['beginning'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
@@ -256,7 +267,7 @@ class Monitor:
                                 for ii in range(len(batch_cuda[i])):
                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                    loss_dict = net.learn(*batch_cuda)
+                    loss_dict = net.learn(*batch_cuda, *args, **kwargs)
 
                     if train_stats_func is None:
                         for k, v in loss_dict.items():
@@ -287,7 +298,7 @@ class Monitor:
                                                 for ii in range(len(batch_cuda[i])):
                                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                                    eval_stats.append(net.eval_loss(*batch_cuda))
+                                    eval_stats.append(net.eval_loss(*batch_cuda, *args, **kwargs))
 
                                 if val_stats_func is not None:
                                     val_stats_func(eval_stats)
@@ -297,8 +308,8 @@ class Monitor:
                                     for k, v in zip(keys, eval_stats):
                                         self.plot(k, v)
 
-        for func_dict in self._schedule['end'].values():
-            func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+            for func_dict in self._schedule['end'].values():
+                func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
     def _atexit(self):
         self._flush()
@@ -469,7 +480,7 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'epoch': self.last_epoch,
+            pkl.dump({'iter': it, 'epoch': self._last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
@@ -478,8 +489,14 @@ class Monitor:
                                                                 (it % self.num_iters) / self.num_iters * 100.,
                                                                 it // self.num_iters + 1) if self.num_iters \
             else 'Iteration {}'.format(it)
-        print('Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show,
-                                                      '\t'.join(prints)))
+        log = 'Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show,
+                                                      '\t'.join(prints))
+        print(log)
+
+        if self.send_slack:
+            message = 'From %s ' % self.current_folder
+            message += log
+            utils.slack_message(self.username, message, self.channel, self.token, **self.kwargs)
 
     def _work(self):
         while True:

@@ -9,6 +9,7 @@ import threading
 from queue import Queue
 from scipy.stats import truncnorm
 from PIL import Image
+from slackclient import SlackClient
 
 cuda_available = T.cuda.is_available()
 
@@ -330,6 +331,11 @@ def smooth(x, beta=.9, window='hanning'):
 
     y = np.convolve(w / w.sum(), s, mode='valid')
     return y if y.shape[0] == x.shape[0] else y[(window_len // 2 - 1):-(window_len // 2)]
+
+
+def slack_message(username, message, channel, token, **kwargs):
+    sc = SlackClient(token)
+    sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
 
 
 function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
