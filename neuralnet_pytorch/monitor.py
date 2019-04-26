@@ -199,11 +199,12 @@ class Monitor:
 
         self.send_slack = send_slack
         if send_slack:
-            self.username = kwargs.get('username', 'me')
-            self.channel = kwargs.get('channel', None)
-            self.token = kwargs.get('token', None)
-            assert self.channel is not None and self.token is not None, \
+            assert kwargs.get('channel', None) is not None and kwargs.get('token', None) is not None, \
                 'channel and token must be provided to send a slack message'
+
+            if kwargs.get('username', None) is None:
+                kwargs['username'] = 'me'
+
         self.kwargs = kwargs
 
         atexit.register(self._atexit)
@@ -496,7 +497,7 @@ class Monitor:
         if self.send_slack:
             message = 'From %s ' % self.current_folder
             message += log
-            utils.slack_message(self.username, message, self.channel, self.token, **self.kwargs)
+            utils.slack_message(message=message, **self.kwargs)
 
     def _work(self):
         while True:
