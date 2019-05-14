@@ -151,11 +151,15 @@ class MultiInputAdaIN(MultiMultiInputModule):
 
 
 class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
+    """
+    Perform Batch Normalization over the last dimension of the input
+    """
+
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
-        assert len(input_shape) == 3, 'Only input of 3 dimensions is supported'
+
         self.input_shape = input_shape
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
@@ -171,9 +175,10 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
-        input = input.transpose(1, 2)
+        shape = input.shape
+        input = input.view(-1, input.shape[-1])
         output = self.activation(super().forward(input), **self.kwargs)
-        output = output.transpose(1, 2)
+        output = output.view(*shape)
         return output
 
     def reset(self):
