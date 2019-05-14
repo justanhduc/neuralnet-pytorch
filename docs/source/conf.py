@@ -19,7 +19,7 @@
 
 # -- Project information -----------------------------------------------------
 
-project = 'neuralnet-pytorch'
+project = 'Neuralnet-pytorch'
 copyright = '2019, Duc Nguyen'
 author = 'Duc Nguyen'
 
@@ -76,7 +76,7 @@ pygments_style = None
 # a list of builtin themes.
 #
 html_theme = 'sphinx_rtd_theme'
-
+html_logo = '_static/pytorch-logo-150x150.png'
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.

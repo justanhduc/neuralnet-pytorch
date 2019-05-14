@@ -24,6 +24,9 @@ class UpsamplingLayer(nn.Upsample, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
+    def forward(self, input, *args, **kwargs):
+        return super().forward(input)
+
     @property
     @utils.validate
     def output_shape(self):
@@ -46,6 +49,9 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
         padding = (padding, padding) if isinstance(padding, int) else tuple(padding)
         super().__init__(kernel_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
                          count_include_pad=count_include_pad)
+
+    def forward(self, input, *args, **kwargs):
+        return super().forward(input)
 
     @property
     @utils.validate
@@ -83,6 +89,9 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
         super().__init__(kernel_size, stride=stride, padding=padding, dilation=dilation, return_indices=return_indices,
                          ceil_mode=ceil_mode)
 
+    def forward(self, input, *args, **kwargs):
+        return super().forward(input)
+
     @property
     @utils.validate
     def output_shape(self):
@@ -114,7 +123,7 @@ class GlobalAvgPool2D(Module):
         super().__init__(input_shape)
         self.keepdim = keepdim
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         out = F.avg_pool2d(input, input.shape[2:], count_include_pad=True)
         return out if self.keepdim else T.flatten(out, 1)
 
@@ -136,7 +145,7 @@ class Cat(MultiSingleInputModule):
         super().__init__(*modules)
         self.dim = dim
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         outputs = super().forward(input)
         return T.cat(outputs, dim=self.dim)
 
@@ -160,7 +169,7 @@ class SequentialCat(Cat):
     def __init__(self, dim=1, *modules):
         super().__init__(dim, *modules)
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         outputs = []
         output = input
         for module in self.children():
@@ -175,7 +184,7 @@ class ConcurrentCat(MultiMultiInputModule):
         super().__init__(*modules)
         self.dim = dim
 
-    def forward(self, *input):
+    def forward(self, *input, **kwargs):
         outputs = super().forward(*input)
         return T.cat(outputs, dim=self.dim)
 
@@ -200,7 +209,7 @@ class Reshape(Module):
         super().__init__(input_shape)
         self.new_shape = shape
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         return T.reshape(input, self.new_shape)
 
     @property
@@ -234,7 +243,7 @@ class Flatten(Module):
         self.start_dim = start_dim
         self.end_dim = end_dim
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         return T.flatten(input, self.start_dim, self.end_dim)
 
     @property
@@ -259,7 +268,7 @@ class DimShuffle(Module):
         super().__init__(input_shape)
         self.pattern = pattern
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         return utils.dimshuffle(input, self.pattern)
 
     @property
