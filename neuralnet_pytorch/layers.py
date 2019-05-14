@@ -12,7 +12,7 @@ import torch.nn as nn
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'Wrapper',
+__all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
            'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum',
            'Net']
@@ -109,8 +109,8 @@ class MultiSingleInputModule(nn.Module, _LayerMethod):
             self.input_shape.append(module.output_shape)
         self.input_shape = tuple(self.input_shape)
 
-    def forward(self, input):
-        outputs = [module(input) for module in self.children()]
+    def forward(self, input, *args, **kwargs):
+        outputs = [module(input, *args, **kwargs) for module in self.children()]
         return tuple(outputs)
 
     def __repr__(self):
@@ -142,6 +142,11 @@ class Sequential(nn.Sequential, _LayerMethod):
         super().__init__(*args)
         self.input_shape = input_shape
 
+    def forward(self, input, *args, **kwargs):
+        for module in self._modules.values():
+            input = module(input, *args, **kwargs)
+        return input
+
     @property
     @utils.validate
     def output_shape(self):
@@ -159,7 +164,7 @@ class Sequential(nn.Sequential, _LayerMethod):
         return super().__repr__() + ' -> {}'.format(self.output_shape)
 
 
-def Wrapper(input_shape, layer, *args, **kwargs):
+def wrapper(input_shape, layer: nn.Module, *args, **kwargs):
     class _Wrapper(layer, _LayerMethod):
         def __init__(self):
             self.output_shape_tmp = kwargs.pop('output_shape', None)
@@ -169,6 +174,9 @@ def Wrapper(input_shape, layer, *args, **kwargs):
             super().__init__(*args, **kwargs)
             if cuda_available:
                 self.cuda(device)
+
+        def forward(self, input, *args, **kwargs):
+            return super().forward(input)
 
         @property
         @utils.validate
@@ -193,7 +201,7 @@ def Wrapper(input_shape, layer, *args, **kwargs):
         def __repr__(self):
             return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-    return _Wrapper()
+    return _Wrapper
 
 
 class Lambda(Module):
@@ -275,7 +283,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         pad = nn.ReflectionPad2d(self.padding) if self.border_mode == 'ref' else nn.ReplicationPad2d(
             (self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2,
              self.ks[0] // 2)) if self.border_mode == 'rep' else lambda x: x
@@ -325,7 +333,7 @@ class FC(nn.Linear, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         if self.flatten:
             input = T.flatten(input, 1)
 
@@ -377,7 +385,7 @@ class Activation(Module):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         return self.activation(input, **self.kwargs)
 
     def __repr__(self):
@@ -468,7 +476,7 @@ class ResNetBasicBlock(Sequential):
                                      norm_method=self.norm_method, **self.kwargs))
         return block
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         res = input
         out = self.block(input)
         out += self.downsample(res)
@@ -527,7 +535,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input, output_size=None):
+    def forward(self, input, output_size=None, *args, **kwargs):
         output = self.activation(super().forward(input, output_size=output_size), **self.kwargs)
         return output
 
@@ -593,7 +601,7 @@ class Sum(MultiSingleInputModule):
     def __init__(self, *modules):
         super().__init__(*modules)
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         outputs = super().forward(input)
         return sum(outputs)
 
@@ -613,7 +621,7 @@ class SequentialSum(Sum):
     def __init__(self, *modules):
         super().__init__(*modules)
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         outputs = []
         output = input
         for module in self.children():
@@ -627,7 +635,7 @@ class ConcurrentSum(MultiMultiInputModule):
     def __init__(self, *modules):
         super().__init__(*modules)
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         outputs = super().forward(input)
         return sum(outputs)
 
@@ -684,10 +692,10 @@ class XConv(Module):
         self.fcs = Sequential(input_shape)
         self.fcs.add_module('fc1', FC(self.fcs.output_shape, out_features, activation=activation))
         if dropout:
-            self.fcs.add_module('dropout1', Wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+            self.fcs.add_module('dropout1', wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
         self.fcs.add_module('fc2', FC(self.fcs.output_shape, out_features, activation=activation))
         if dropout:
-            self.fcs.add_module('dropout2', Wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+            self.fcs.add_module('dropout2', wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
 
         from neuralnet_pytorch.resizing import DimShuffle
         from neuralnet_pytorch.normalization import BatchNorm2d
@@ -710,7 +718,7 @@ class XConv(Module):
             self.end_conv.add_module('bn', BatchNorm2d(self.end_conv.output_shape, momentum=.9, activation=activation))
         self.end_conv.add_module('dimshuffle2', DimShuffle(self.end_conv.output_shape, (0, 2, 3, 1)))
 
-    def forward(self, *input):
+    def forward(self, *input, **kwargs):
         rep_pt, pts, fts = input
 
         if fts is not None:
@@ -786,7 +794,7 @@ class GraphConv(FC):
             else:
                 self.bias_init(self.bias)
 
-    def forward(self, input, adj):
+    def forward(self, input, adj, *args, **kwargs):
         support = T.mm(input, self.weight.t())
         output = T.sparse.mm(adj, support)
         if self.bias is not None:

@@ -28,7 +28,7 @@ class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         output = self.activation(super().forward(input), **self.kwargs)
         return output
 
@@ -59,7 +59,7 @@ class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         output = self.activation(super().forward(input), **self.kwargs)
         return output
 
@@ -113,7 +113,7 @@ class AdaIN(MultiSingleInputModule):
         self.dim1 = dim1
         self.dim2 = dim2
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         out1, out2 = super().forward(input)
         mean1, std1 = T.mean(out1, self.dim1, keepdim=True), T.sqrt(T.var(out1, self.dim1, keepdim=True) + 1e-8)
         mean2, std2 = T.mean(out2, self.dim2, keepdim=True), T.sqrt(T.var(out2, self.dim2, keepdim=True) + 1e-8)
@@ -170,7 +170,7 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         input = input.transpose(1, 2)
         output = self.activation(super().forward(input), **self.kwargs)
         output = output.transpose(1, 2)
