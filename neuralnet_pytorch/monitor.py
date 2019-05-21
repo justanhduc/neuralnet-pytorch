@@ -125,7 +125,7 @@ class Monitor:
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
-        self._last_epoch = None
+        self._last_epoch = 0
         self.print_freq = print_freq
         if current_folder:
             self.current_folder = current_folder
@@ -238,12 +238,13 @@ class Monitor:
     def get_epoch(self):
         return self._last_epoch
 
-    def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=0,
+    def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
                      train_stats_func=None, val_stats_func=None, plot_lr=False, *args, **kwargs):
         assert isinstance(net, nnt.Net), 'net must be an instance of Net'
         assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
             'net must be an instance of Module or Sequential'
 
+        start_epoch = self._last_epoch if start_epoch is None else start_epoch
         for epoch in range(start_epoch, n_epochs):
             self._last_epoch = epoch
             for func_dict in self._schedule['beginning'].values():
