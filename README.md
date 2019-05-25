@@ -61,10 +61,10 @@ Bleeding-edge version
 pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
 ```
 
-For some ops, Cuda/C++ implementations are available. To install the version with these implementations, use
+To install the version without some collected Cuda/C++ ops, use
 
 ```
-pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@linux
+pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@plain
 ```
 
 # Usages

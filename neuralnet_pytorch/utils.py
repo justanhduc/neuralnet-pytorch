@@ -10,11 +10,24 @@ from queue import Queue
 from scipy.stats import truncnorm
 from PIL import Image
 from slackclient import SlackClient
+import warnings
 
 cuda_available = T.cuda.is_available()
 
 __all__ = ['cuda_available', 'DataLoader']
 
+
+def deprecated(new_func, version):
+    def _deprecated(func):
+        """print out a deprecation warning"""
+
+        def func_wrapper(*args, **kwargs):
+            warnings.warn('%s is deprecated and will be removed in version %s. Use %s instead.' %
+                          (func.__name__, version, new_func.__name__), DeprecationWarning)
+            return func(*args, **kwargs)
+
+        return func_wrapper
+    return _deprecated
 
 def validate(func):
     """make sure output shape is a list of ints"""

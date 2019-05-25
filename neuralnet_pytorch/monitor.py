@@ -355,6 +355,7 @@ class Monitor:
     def scatter(self, name, value):
         self._pointcloud_since_last_flush[name][self._iter] = value
 
+    @utils.deprecated(imwrite, '0.0.5')
     def save_image(self, name, value, callback=lambda x: x):
         self._img_since_last_flush[name][self._iter] = callback(value)
         if self.use_tensorboard:
