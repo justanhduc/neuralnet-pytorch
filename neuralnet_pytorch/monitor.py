@@ -24,7 +24,15 @@ import visdom
 from shutil import copyfile
 import torch as T
 import torch.nn as nn
-from tensorboardX import SummaryWriter
+from sklearn.metrics import confusion_matrix
+from sklearn.utils.multiclass import unique_labels
+import distutils.version
+
+minimum_required = '1.1.0'
+if distutils.version.LooseVersion(T.__version__) < distutils.version.LooseVersion(minimum_required):
+    from tensorboardX import SummaryWriter
+else:
+    from torch.utils.tensorboard import SummaryWriter
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
@@ -90,7 +98,7 @@ def eval_tracked_variables():
     return dict
 
 
-def spawn_defaultdict():
+def _spawn_defaultdict_ordereddict():
     return collections.OrderedDict()
 
 
@@ -110,16 +118,17 @@ class Monitor:
         :param kwargs: some miscellaneous options for Visdom and other functions
         """
         self._iter = 0
-        self._num_since_beginning = collections.defaultdict(spawn_defaultdict)
-        self._num_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._img_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._hist_since_beginning = collections.defaultdict(spawn_defaultdict)
-        self._hist_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._pointcloud_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._options = collections.defaultdict(spawn_defaultdict)
+        self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._predictions_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
-        self._schedule = {'beginning': collections.defaultdict(spawn_defaultdict),
-                          'end': collections.defaultdict(spawn_defaultdict)}
+        self._schedule = {'beginning': collections.defaultdict(_spawn_defaultdict_ordereddict),
+                          'end': collections.defaultdict(_spawn_defaultdict_ordereddict)}
         self._timer = time.time()
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
@@ -239,22 +248,23 @@ class Monitor:
         return self._last_epoch
 
     def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
-                     train_stats_func=None, val_stats_func=None, plot_lr=False, *args, **kwargs):
+                     train_stats_func=None, val_stats_func=None, *args, **kwargs):
         assert isinstance(net, nnt.Net), 'net must be an instance of Net'
         assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
             'net must be an instance of Module or Sequential'
 
+        collect = {
+            'scalars': self.plot,
+            'images': self.imwrite,
+            'histograms': self.hist,
+            'pointclouds': self.scatter,
+            'predictions': self.confusion_matrix
+        }
         start_epoch = self._last_epoch if start_epoch is None else start_epoch
         for epoch in range(start_epoch, n_epochs):
             self._last_epoch = epoch
             for func_dict in self._schedule['beginning'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
-
-            if plot_lr:
-                if net.scheduler:
-                    self.plot('lr', net.scheduler.optimizer.param_groups[0]['lr'])
-                else:
-                    self.plot('lr', net.optimizer.param_groups[0]['lr'])
 
             for it, batch in enumerate(train_loader):
                 net.train(True)
@@ -269,26 +279,30 @@ class Monitor:
                                 for ii in range(len(batch_cuda[i])):
                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                    loss_dict = net.learn(*batch_cuda, *args, **kwargs)
+                    stats_dict = net.learn(*batch_cuda, *args, **kwargs)
 
                     if train_stats_func is None:
-                        for k, v in loss_dict.items():
-                            if isinstance(v, T.Tensor):
-                                v = nnt.utils.to_numpy(v)
+                        for t, d in stats_dict.items():
+                            for k, v in d.items():
+                                if t == 'scalars':
+                                    if np.isnan(v) or np.isinf(v):
+                                        raise ValueError('{} is NaN/inf. Training failed!'.format(k))
 
-                            if np.isnan(v) or np.isinf(v):
-                                raise ValueError('{} is NaN/inf. Training failed!'.format(k))
-
-                            self.plot(k, v)
+                                collect[t](k, v)
                     else:
-                        train_stats_func(loss_dict)
+                        train_stats_func(stats_dict)
 
                     if valid_freq:
                         if it % valid_freq == 0:
                             net.eval()
 
                             with T.set_grad_enabled(False):
-                                eval_stats = []
+                                eval_dict = {
+                                    'scalars': collections.defaultdict(lambda: []),
+                                    'histograms': collections.defaultdict(lambda: []),
+                                    'predictions': collections.defaultdict(lambda: [])
+                                }
+
                                 for itt, batch in enumerate(eval_loader):
                                     batch_cuda = list(batch)
                                     if nnt.cuda_available:
@@ -300,15 +314,23 @@ class Monitor:
                                                 for ii in range(len(batch_cuda[i])):
                                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                                    eval_stats.append(net.eval_loss(*batch_cuda, *args, **kwargs))
+                                    eval_stats = net.eval_procedure(*batch_cuda, *args, **kwargs)
 
-                                if val_stats_func is not None:
-                                    val_stats_func(eval_stats)
-                                else:
-                                    keys = list(eval_stats[0].keys())
-                                    eval_stats = np.mean([list(stats.values()) for stats in eval_stats], 0)
-                                    for k, v in zip(keys, eval_stats):
-                                        self.plot(k, v)
+                                    if val_stats_func is None:
+                                        for t, d in eval_stats.items():
+                                            if t in ('scalars', 'histograms', 'predictions'):
+                                                for k, v in d.items():
+                                                    eval_dict[t][k].append(v)
+                                            else:
+                                                for k, v in d.items():
+                                                    collect[t](k, v)
+                                    else:
+                                        val_stats_func(eval_stats)
+
+                                for t in ('scalars', 'histograms', 'predictions'):
+                                    for k, v in eval_dict[t].items():
+                                        v = np.mean(v) if t == 'scalars' else np.concatenate(v)
+                                        collect[t](k, v)
 
             for func_dict in self._schedule['end'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
@@ -326,11 +348,13 @@ class Monitor:
             outfile.write(str(obj))
             outfile.close()
 
-    def dump_model(self, network):
+    def dump_model(self, network, *args, **kwargs):
         assert isinstance(network, (
             nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
             type(network))
         self.dump_rep('network.txt', network)
+        if self.use_tensorboard:
+            self.writer.add_graph(network, *args, **kwargs)
 
     def __enter__(self):
         pass
@@ -347,21 +371,33 @@ class Monitor:
     def tick(self):
         self._iter += 1
 
-    def plot(self, name, value):
+    def plot(self, name: str, value):
+        if isinstance(value, T.Tensor):
+            value = utils.to_numpy(value)
+
         self._num_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
 
     def scatter(self, name, value):
+        if isinstance(value, T.Tensor):
+            value = utils.to_numpy(value)
+
         self._pointcloud_since_last_flush[name][self._iter] = value
 
-    @utils.deprecated(imwrite, '0.0.5')
-    def save_image(self, name, value, callback=lambda x: x):
-        self._img_since_last_flush[name][self._iter] = callback(value)
+    @utils.deprecated(imwrite, '0.0.6')
+    def save_image(self, name: str, value):
+        if isinstance(value, T.Tensor):
+            value = utils.to_numpy(value)
+
+        self._img_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_image('image/' + name.replace(' ', '-'), value, self._iter)
 
     def hist(self, name, value, n_bins=20, last_only=False):
+        if isinstance(value, T.Tensor):
+            value = utils.to_numpy(value)
+
         if self._iter == 0:
             self._options[name]['last_only'] = last_only
             self._options[name]['n_bins'] = n_bins
@@ -369,6 +405,13 @@ class Monitor:
         self._hist_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
             self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
+
+    def confusion_matrix(self, name, value):
+        assert isinstance(value, (list, tuple)), 'value must be a tuple of predictions and ground truth labels, with optional class names'
+        assert len(value) == 2 or len(value) == 3, 'value must be a tuple of predictions and ground truth labels, with optional class names'
+
+        value = tuple(utils.to_numpy(v) if isinstance(v, T.Tensor) else v for v in value)
+        self._predictions_since_last_flush[name][self._iter] = value
 
     def schedule(self, name, func, beginning=True, *args, **kwargs):
         assert name is not None , 'name and func must be provided'
@@ -380,7 +423,7 @@ class Monitor:
         self._schedule[when][name]['kwargs'] = kwargs
 
     def _worker(self, it, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
-                _pointcloud_since_last_flush):
+                _pointcloud_since_last_flush, _predictions_since_last_flush):
         prints = []
 
         # plot statistics
@@ -442,6 +485,11 @@ class Monitor:
 
         # make histograms of recorded data
         for name, vals in list(_hist_since_last_flush.items()):
+            if self.use_tensorboard:
+                k = max(list(_hist_since_last_flush[name].keys()))
+                val = np.array(vals[k]).flatten()
+                self.writer.add_histogram(name, val, global_step=k)
+
             n_bins = self._options[name].get('n_bins')
             last_only = self._options[name].get('last_only')
 
@@ -482,10 +530,64 @@ class Monitor:
                     fig.clear()
         plt.close('all')
 
+        # plot confusion matrix
+        # code adapted from https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html#sphx-glr-auto-examples-model-selection-plot-confusion-matrix-py
+        for name, vals in list(_predictions_since_last_flush.items()):
+            idx = max(vals.keys())
+
+            if len(vals[idx]) == 2:
+                y_pred, y_true = vals[idx]
+                y_pred, y_true = np.array(y_pred), np.array(y_true)
+                classes = np.arange(y_pred.shape[0])
+            else:
+                y_pred, y_true, classes = vals[idx]
+                y_pred, y_true, classes = np.array(y_pred), np.array(y_true), np.array(classes)
+
+            for normalize in (True, False):
+                if normalize:
+                    title = 'Normalized confusion matrix'
+                else:
+                    title = 'Confusion matrix, without normalization'
+
+                # Compute confusion matrix
+                cfm = confusion_matrix(y_true, y_pred)
+                # Only use the labels that appear in the data
+                classes = classes[unique_labels(y_true, y_pred)]
+                if normalize:
+                    cfm = cfm.astype('float') / cfm.sum(axis=1)[:, np.newaxis]
+
+                fig, ax = plt.subplots()
+                im = ax.imshow(cfm, interpolation='nearest', cmap=plt.cm.Blues)
+                ax.figure.colorbar(im, ax=ax)
+                # We want to show all ticks...
+                ax.set(xticks=np.arange(cfm.shape[1]),
+                       yticks=np.arange(cfm.shape[0]),
+                       # ... and label them with the respective list entries
+                       xticklabels=classes, yticklabels=classes,
+                       title=title,
+                       ylabel='True label',
+                       xlabel='Predicted label')
+
+                # Rotate the tick labels and set their alignment.
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+                         rotation_mode="anchor")
+
+                # Loop over data dimensions and create text annotations.
+                fmt = '.2f' if normalize else 'd'
+                thresh = cfm.max() / 2.
+                for i in range(cfm.shape[0]):
+                    for j in range(cfm.shape[1]):
+                        ax.text(j, i, format(cfm[i, j], fmt),
+                                ha="center", va="center",
+                                color="white" if cfm[i, j] > thresh else "black")
+                fig.tight_layout()
+                plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '%d.jpg' % normalize))
+
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({'iter': it, 'epoch': self._last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
+                      'pred': dict(self._predictions_since_last_flush),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
@@ -510,13 +612,15 @@ class Monitor:
 
     def _flush(self):
         self.q.put((self._worker, self._iter, dict(self._num_since_last_flush), dict(self._img_since_last_flush),
-                    dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush)))
+                    dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush),
+                    dict(self._predictions_since_last_flush)))
         self._num_since_last_flush.clear()
         self._img_since_last_flush.clear()
         self._hist_since_last_flush.clear()
         self._pointcloud_since_last_flush.clear()
+        self._predictions_since_last_flush.clear()
 
-    def _versioning(self, file, keep):
+    def _version(self, file, keep):
         name, ext = os.path.splitext(file)
         versioned_filename = os.path.normpath(name + '-%d' % self._iter + ext)
 
@@ -554,7 +658,7 @@ class Monitor:
             method(name, obj, **kwargs)
             print('Object dumped to %s' % name)
         else:
-            normed_name = self._versioning(name, keep)
+            normed_name = self._version(name, keep)
             normed_name = os.path.join(self.current_folder, normed_name)
             method(normed_name, obj, **kwargs)
             print('Object dumped to %s' % normed_name)
@@ -625,13 +729,14 @@ class Monitor:
         return T.load(name, **kwargs)
 
     def reset(self):
-        self._num_since_beginning = collections.defaultdict(spawn_defaultdict)
-        self._num_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._img_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._hist_since_beginning = collections.defaultdict(spawn_defaultdict)
-        self._hist_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._pointcloud_since_last_flush = collections.defaultdict(spawn_defaultdict)
-        self._options = collections.defaultdict(spawn_defaultdict)
+        self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._predictions_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
         self._iter = 0
         self._timer = time.time()

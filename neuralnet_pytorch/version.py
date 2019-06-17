@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function, division
 from neuralnet_pytorch._version import get_versions
 
 author = 'DUC NGUYEN'
-FALLBACK_VERSION = "0.0.3+unknown"
+FALLBACK_VERSION = "0.0.4+unknown"
 
 info = get_versions()
 if info['error'] is not None:

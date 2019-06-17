@@ -3,6 +3,7 @@ import os
 import versioneer
 
 version_data = versioneer.get_versions()
+CMD_CLASS = versioneer.get_cmdclass()
 
 if version_data['error'] is not None:
     # Get the fallback version
@@ -45,7 +46,8 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['examples']),
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'tensorboardX', 'slackclient'],
+        cmdclass=CMD_CLASS,
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',

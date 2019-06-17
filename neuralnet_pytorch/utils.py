@@ -1,25 +1,91 @@
-import json
-
 import numpy as np
 import torch as T
 import torch.nn.functional as F
-import yaml
 import abc
 import threading
+import warnings
+
 from queue import Queue
 from scipy.stats import truncnorm
 from PIL import Image
 from slackclient import SlackClient
-import warnings
+from torch._six import container_abcs
+from itertools import repeat
+from functools import wraps
 
 cuda_available = T.cuda.is_available()
 
 __all__ = ['cuda_available', 'DataLoader']
 
 
+def _wrap(f):
+    @wraps(f)
+    def wrapper(x, *args, **kwargs):
+        return f(x)
+
+    return wrapper
+
+
+def _make_input_shape(m, n):
+    def parse(x):
+        if isinstance(x, container_abcs.Iterable):
+            return x
+        return tuple(repeat(None, m)) + (x, ) + tuple(repeat(None, n))
+    return parse
+
+
+_image_shape = _make_input_shape(1, 2)
+_matrix_shape = _make_input_shape(1, 0)
+_pointset_shape = _make_input_shape(2, 0)
+
+
+def validate(func):
+    """a decorator to make sure output shape is a list of ints"""
+
+    def wrapper(self):
+        if func(self) is None:
+            return None
+
+        out = [None if x is None or np.isnan(x) else int(x) for x in func(self)]
+        return tuple(out)
+
+    return wrapper
+
+
+def no_dim_change_op(cls):
+    """a decorator to add output_shape to an op that does not change the tensor shape"""
+
+    @validate
+    def output_shape(self):
+        return None if self.input_shape is None else tuple(self.input_shape)
+
+    cls.output_shape = property(output_shape)
+    return cls
+
+
+def add_simple_repr(cls):
+    """a decorator to add a simple repr to the designated class"""
+
+    def _repr(self):
+        return super(cls, self).__repr__() + ' -> {}'.format(self.output_shape)
+
+    setattr(cls, '__repr__', _repr)
+    return cls
+
+
+def add_custom_repr(cls):
+    """a decorator to add a custom repr to the designated class"""
+
+    def _repr(self):
+        return self.__class__.__name__ + '({}) -> {}'.format(self.extra_repr(), self.output_shape)
+
+    setattr(cls, '__repr__', _repr)
+    return cls
+
+
 def deprecated(new_func, version):
     def _deprecated(func):
-        """print out a deprecation warning"""
+        """prints out a deprecation warning"""
 
         def func_wrapper(*args, **kwargs):
             warnings.warn('%s is deprecated and will be removed in version %s. Use %s instead.' %
@@ -29,35 +95,13 @@ def deprecated(new_func, version):
         return func_wrapper
     return _deprecated
 
-def validate(func):
-    """make sure output shape is a list of ints"""
 
-    def func_wrapper(self):
-        if func(self) is None:
-            return None
-
-        shape = [None if x is None else None if np.isnan(x) else x for x in func(self)]
-        out = [int(x) if x is not None else x for x in shape]
-        return tuple(out)
-
-    return func_wrapper
-
-
-class ConfigParser(object):
-    def __init__(self, config_file, type='json', **kwargs):
-        super(ConfigParser, self).__init__()
-        self.config_file = config_file
-        self.config = self.load_configuration()
-        self.type = type
-
-    def load_configuration(self):
-        try:
-            with open(self.config_file) as f:
-                data = json.load(f) if type == 'json' else yaml.load(f)
-            print('Config file loaded successfully')
-        except:
-            raise NameError('Unable to open config file!!!')
-        return data
+def get_non_none(array):
+    try:
+        e = next(item for item in array if item is not None)
+    except StopIteration:
+        e = None
+    return e
 
 
 class ThreadsafeIter:
@@ -207,11 +251,6 @@ def truncated_normal(tensor, a=-1, b=1, mean=0., std=1.):
     values = truncnorm.rvs(a, b, loc=mean, scale=std, size=list(tensor.shape))
     with T.no_grad():
         tensor.data.copy_(T.tensor(values))
-
-
-def lrelu(x, **kwargs):
-    alpha = kwargs.get('alpha', 0.2)
-    return F.leaky_relu(x, alpha, False)
 
 
 def rgb2gray(img):
@@ -388,7 +427,46 @@ def slack_message(username, message, channel, token, **kwargs):
     sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
 
 
-function = {'relu': lambda x, **kwargs: F.relu(x, False), 'linear': lambda x, **kwargs: x, None: lambda x, **kwargs: x,
-            'lrelu': lambda x, **kwargs: lrelu(x, **kwargs), 'tanh': lambda x, **kwargs: T.tanh(x),
-            'sigmoid': lambda x, **kwargs: T.sigmoid(x), 'elu': lambda x, **kwargs: F.elu(x, **kwargs),
-            'softmax': lambda x, **kwargs: F.softmax(x, **kwargs)}
+def relu(x, **kwargs):
+    return T.relu(x)
+
+
+def linear(x, **kwargs):
+    return x
+
+
+def lrelu(x, **kwargs):
+    return F.leaky_relu(x, kwargs.get('negative_slope', .2), kwargs.get('inplace', False))
+
+
+def tanh(x, **kwargs):
+    return T.tanh(x)
+
+
+def sigmoid(x, **kwargs):
+    return T.sigmoid(x)
+
+
+def elu(x, **kwargs):
+    return F.elu(x, kwargs.get('alpha', 1.), kwargs.get('inplace', False))
+
+
+def softmax(x, **kwargs):
+    return T.softmax(x, kwargs.get('dim', None))
+
+
+def selu(x, **kwargs):
+    return T.selu(x)
+
+
+function = {
+    'relu': relu,
+    'linear': linear,
+    None: linear,
+    'lrelu': lrelu,
+    'tanh': tanh,
+    'sigmoid': sigmoid,
+    'elu': elu,
+    'softmax': softmax,
+    'selu': selu
+}
