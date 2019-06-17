@@ -16,37 +16,45 @@ following snippet in Pytorch
 
 ```
 from torch import nn
-model = nn.Sequential()
-model.add_module('conv1', nn.Conv2d(1, 20, 5, padding=2))
-model.add_module('relu1', nn.ReLU())
-model.add_module('conv2', nn.Conv2d(20, 64, 5, padding=2))
-model.add_module('relu2', nn.ReLU())
+model = nn.Sequential(
+    nn.Conv2d(1, 20, 5, padding=2),
+    nn.ReLU(),
+    nn.Conv2d(20, 64, 5, padding=2),
+    nn.ReLU()
+)
 ```
 
 can be rewritten in Neuralnet-pytorch as 
+```
+import neuralnet_pytorch as nnt
+model = nnt.Sequential(
+    nnt.Conv2d(1, 20, 5, padding='half', activation='relu'),
+    nnt.Conv2d(20, 64, 5, padding='half', activation='relu')
+)
+```
+
+which is the same as the native Pytorch, or 
 
 ```
 import neuralnet_pytorch as nnt
-model = nnt.Sequential((None, 1, None, None))
+model = nnt.Sequential(input_shape=1)
 model.add_module('conv1', nnt.Conv2d(model.output_shape, 20, 5, padding='half', activation='relu'))
 model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', activation='relu'))
 ```
-which frees you from doing a lot of manual calculations when adding one layer on top of another. Theano folks will also
-find some reminiscence as many functions are highly inspired by Theano.  
+which frees you from a lot of memorizations and manual calculations when adding one layer on top of another. 
+Theano folks will also find some reminiscence as many functions are highly inspired by Theano.  
 
 # Requirements
 
-[Pytorch](http://deeplearning.net/software/theano/)
-
-[Scipy](https://www.scipy.org/install.html) 
-
-[Numpy+mkl](http://www.lfd.uci.edu/~gohlke/pythonlibs/#numpy) 
+[Pytorch](https://pytorch.org/) >= 1.0.0
 
 [Matplotlib](https://matplotlib.org/)
 
 [Visdom](https://github.com/facebookresearch/visdom)
 
-[TensorboardX](https://github.com/lanpa/tensorboardX)
+[Tensorboard](https://www.tensorflow.org/tensorboard)
+
+[Gin-config](https://github.com/google/gin-config) (optional)
 
 # Installation
 
@@ -88,6 +96,6 @@ All PRs are welcome.
 
 The CUDA Chamfer distance is taken from the [AtlasNet](https://github.com/ThibaultGROUEIX/AtlasNet) repo.
 
-The EMD loss is taken from [this Pytorch wrapper](https://gist.github.com/pclucas14/826c129aea315b02cbde0ec23ceb1068).
+The AdaBound optimizer is taken from its [official repo](https://github.com/Luolc/AdaBound).
 
-The AdaBound optimizer is taken from its [official repo](https://github.com/Luolc/AdaBound). 
+The adapted Gin for Pytorch code is taken from [Gin-config](https://github.com/google/gin-config).

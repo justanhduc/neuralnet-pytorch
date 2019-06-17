@@ -4,6 +4,8 @@ import versioneer
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 version_data = versioneer.get_versions()
+CMD_CLASS = versioneer.get_cmdclass()
+CMD_CLASS.update({'build_ext': BuildExtension})
 
 if version_data['error'] is not None:
     # Get the fallback version
@@ -52,10 +54,8 @@ def setup_package():
             ]),
         ],
         dependency_links=['https://github.com/szagoruyko/pyinn'],
-        cmdclass={
-            'build_ext': BuildExtension
-        },
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'tensorboardX', 'slackclient'],
+        cmdclass=CMD_CLASS,
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',

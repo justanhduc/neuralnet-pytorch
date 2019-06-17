@@ -2,6 +2,7 @@ import torch as T
 import torch.nn as nn
 
 from neuralnet_pytorch import utils
+from neuralnet_pytorch.utils import _image_shape, _matrix_shape, _pointset_shape
 from neuralnet_pytorch.layers import _LayerMethod, MultiMultiInputModule, MultiSingleInputModule
 from neuralnet_pytorch.utils import cuda_available
 
@@ -9,11 +10,15 @@ __all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN',
            'FeatureNorm1d']
 
 
+@utils.add_simple_repr
+@utils.no_dim_change_op
 class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
+        input_shape = _matrix_shape(input_shape)
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
+
         self.input_shape = input_shape
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
@@ -37,15 +42,16 @@ class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
+@utils.no_dim_change_op
 class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
+        input_shape = _image_shape(input_shape)
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
+
         self.input_shape = input_shape
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
             else lambda x, **kwargs: activation(x)
@@ -68,46 +74,59 @@ class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
+@utils.no_dim_change_op
 class LayerNorm(nn.LayerNorm, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, **kwargs):
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
-        self.input_shape = input_shape
+        self.input_shape = _matrix_shape(input_shape)
         super().__init__(input_shape[1:], eps, elementwise_affine)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
-class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
+@utils.add_simple_repr
+@utils.no_dim_change_op
+class InstanceNorm1d(nn.InstanceNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
+        input_shape = _matrix_shape(input_shape)
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
+
+        self.input_shape = input_shape
+        super().__init__(input_shape[-1], eps, momentum, affine, track_running_stats)
+
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
+
+
+@utils.add_simple_repr
+@utils.no_dim_change_op
+class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
+    def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, **kwargs):
+        input_shape = _image_shape(input_shape)
+        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+            input_shape)
+
         self.input_shape = input_shape
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
-
 
 class AdaIN(MultiSingleInputModule):
-    '''
+    """
     Adaptive Instance Normalization
     out1 = module1(input)
     out2 = module2(input)
     out = std(out2) * (out1 - mean(out1)) / std(out1) + mean(out2)
-    '''
+    """
+
     def __init__(self, module1, module2, dim1=1, dim2=1):
         super().__init__(module1, module2)
         self.dim1 = dim1
@@ -124,14 +143,18 @@ class AdaIN(MultiSingleInputModule):
     def output_shape(self):
         return self.input_shape[0]
 
+    def extra_repr(self):
+        s = 'dim1={dim1}, dim2={dim2}'.format(**self.__dict__)
+        return s
+
 
 class MultiInputAdaIN(MultiMultiInputModule):
-    '''
+    """
     Adaptive Instance Normalization
     out1 = module1(input1)
     out2 = module2(input2)
     out = std(out2) * (out1 - mean(out1)) / std(out1) + mean(out2)
-    '''
+    """
 
     def __init__(self, module1, module2, dim1=1, dim2=1):
         super().__init__(module1, module2)
@@ -149,14 +172,21 @@ class MultiInputAdaIN(MultiMultiInputModule):
     def output_shape(self):
         return self.input_shape[0]
 
+    def extra_repr(self):
+        s = 'dim1={dim1}, dim2={dim2}'.format(**self.__dict__)
+        return s
 
+
+@utils.add_simple_repr
+@utils.no_dim_change_op
 class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
     """
-    Perform Batch Normalization over the last dimension of the input
+    Performs Batch Normalization over the last dimension of the input
     """
 
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
+        input_shape = _pointset_shape(input_shape)
         assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
@@ -185,6 +215,3 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
         super().reset_parameters()
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
-
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)

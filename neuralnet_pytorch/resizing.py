@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from neuralnet_pytorch import utils
+from neuralnet_pytorch.utils import _image_shape
 from neuralnet_pytorch.layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 from neuralnet_pytorch.utils import cuda_available
 
@@ -11,8 +12,9 @@ __all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatt
            'GlobalAvgPool2D', 'ConcurrentCat', 'SequentialCat']
 
 
+@utils.add_simple_repr
 class UpsamplingLayer(nn.Upsample, _LayerMethod):
-    def __init__(self, input_shape, size=None, scale_factor=None, mode='bilinear', align_corners=True, **kwargs):
+    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=False, input_shape=None, **kwargs):
         assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
                                                              'Received %s.' % type(scale_factor)
 
@@ -24,7 +26,7 @@ class UpsamplingLayer(nn.Upsample, _LayerMethod):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
 
     @property
@@ -37,12 +39,11 @@ class UpsamplingLayer(nn.Upsample, _LayerMethod):
         return (shape[:2] + self.new_shape) if self.size \
             else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
 class AvgPool2d(nn.AvgPool2d, _LayerMethod):
-    def __init__(self, input_shape, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False):
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False, input_shape=None):
+        input_shape = _image_shape(input_shape)
         self.input_shape = input_shape
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
         stride = kernel_size if stride is None else (stride, stride) if isinstance(stride, int) else tuple(stride)
@@ -50,14 +51,14 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
         super().__init__(kernel_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
                          count_include_pad=count_include_pad)
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
 
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
+        if all(self.input_shape) is None:
+            return tuple(self.input_shape)
 
         shape = [np.nan if x is None else x for x in self.input_shape]
         shape[2] = (shape[2] + 2 * self.padding[0] - self.kernel_size[0]) // self.stride[0] + 1
@@ -74,13 +75,12 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
                 shape[3] += np.mod(shape[3], self.stride[1])
         return tuple(shape)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
 class MaxPool2d(nn.MaxPool2d, _LayerMethod):
-    def __init__(self, input_shape, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
-                 ceil_mode=False):
+    def __init__(self, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False,
+                 input_shape=None):
+        input_shape = _image_shape(input_shape)
         self.input_shape = input_shape
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
         stride = kernel_size if stride is None else (stride, stride) if isinstance(stride, int) else tuple(stride)
@@ -89,14 +89,14 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
         super().__init__(kernel_size, stride=stride, padding=padding, dilation=dilation, return_indices=return_indices,
                          ceil_mode=ceil_mode)
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
 
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
+        if all(self.input_shape) is None:
+            return tuple(self.input_shape)
 
         shape = [np.nan if x is None else x for x in self.input_shape]
         ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(self.kernel_size, self.dilation)]
@@ -114,35 +114,35 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
                 shape[3] += np.mod(shape[3], self.stride[1])
         return tuple(shape)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_custom_repr
 class GlobalAvgPool2D(Module):
-    def __init__(self, input_shape, keepdim=False):
+    def __init__(self, keepdim=False, input_shape=None):
+        input_shape = _image_shape(input_shape)
         super().__init__(input_shape)
         self.keepdim = keepdim
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         out = F.avg_pool2d(input, input.shape[2:], count_include_pad=True)
         return out if self.keepdim else T.flatten(out, 1)
 
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
+        if all(self.input_shape) is None:
+            return tuple(self.input_shape)
 
         output_shape = tuple(self.input_shape[:2])
         return output_shape if not self.keepdim else output_shape + (1, 1)
 
-    def __str__(self):
-        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
+    def extra_repr(self):
+        s = 'keepdim={keepdim}'.format(**self.__dict__)
+        return s
 
 
 class Cat(MultiSingleInputModule):
-    def __init__(self, dim=1, *modules):
-        super().__init__(*modules)
+    def __init__(self, dim=1, *modules_or_tensors):
+        super().__init__(*modules_or_tensors)
         self.dim = dim
 
     def forward(self, input, *args, **kwargs):
@@ -157,31 +157,37 @@ class Cat(MultiSingleInputModule):
 
         shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]
         depth = sum([shape_nan[i][self.dim] for i in range(len(self.input_shape))])
-        shape = list(shape_nan[0])
+
+        shapes_transposed = [item for item in zip(*self.input_shape)]
+        shape = list(map(utils.get_non_none, shapes_transposed))
         shape[self.dim] = depth
         return tuple(shape)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, dim={}) -> {}'.format(self.input_shape, self.dim, self.output_shape)
+    def extra_repr(self):
+        s = 'dim={}'.format(self.dim)
+        return s
 
 
 class SequentialCat(Cat):
-    def __init__(self, dim=1, *modules):
-        super().__init__(dim, *modules)
+    def __init__(self, dim=1, *modules_or_tensors):
+        super().__init__(dim, *modules_or_tensors)
 
     def forward(self, input, *args, **kwargs):
         outputs = []
         output = input
-        for module in self.children():
-            output = module(output)
-            outputs.append(output)
+        for name, module in self.named_children():
+            if name.startswith('tensor'):
+                outputs.append(module())
+            else:
+                output = module(output)
+                outputs.append(output)
 
         return T.cat(outputs, dim=self.dim)
 
 
 class ConcurrentCat(MultiMultiInputModule):
-    def __init__(self, dim=1, *modules):
-        super().__init__(*modules)
+    def __init__(self, dim=1, *modules_or_tensors):
+        super().__init__(*modules_or_tensors)
         self.dim = dim
 
     def forward(self, *input, **kwargs):
@@ -196,20 +202,23 @@ class ConcurrentCat(MultiMultiInputModule):
 
         shape_nan = [[np.nan if x is None else x for x in self.input_shape[i]] for i in range(len(self.input_shape))]
         depth = sum([shape_nan[i][self.dim] for i in range(len(self.input_shape))])
-        shape = list(shape_nan[0])
+
+        shapes_transposed = [item for item in zip(*self.input_shape)]
+        shape = list(map(utils.get_non_none, shapes_transposed))
         shape[self.dim] = depth
         return tuple(shape)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, dim={}) -> {}'.format(self.input_shape, self.dim, self.output_shape)
+    def extra_repr(self):
+        s = 'dim={}'.format(self.dim)
+        return s
 
 
 class Reshape(Module):
-    def __init__(self, input_shape, shape):
+    def __init__(self, shape, input_shape=None):
         super().__init__(input_shape)
         self.new_shape = shape
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return T.reshape(input, self.new_shape)
 
     @property
@@ -232,18 +241,18 @@ class Reshape(Module):
         else:
             return tuple(self.new_shape)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, new_shape={}) -> {}'.format(
-            self.input_shape, self.new_shape, self.output_shape)
+    def extra_repr(self):
+        s = 'new_shape={new_shape}'.format(**self.__dict__)
+        return s
 
 
 class Flatten(Module):
-    def __init__(self, input_shape, start_dim=0, end_dim=-1):
+    def __init__(self, start_dim=0, end_dim=-1, input_shape=None):
         super().__init__(input_shape)
         self.start_dim = start_dim
         self.end_dim = end_dim
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return T.flatten(input, self.start_dim, self.end_dim)
 
     @property
@@ -258,17 +267,17 @@ class Flatten(Module):
         shape = shape[:start_dim] + [np.prod(shape[start_dim:end_dim + 1])] + shape[end_dim + 1:]
         return shape
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, start_dim={}, end_dim={}) -> {}'.format(
-            self.input_shape, self.start_dim, self.end_dim, self.output_shape)
+    def extra_repr(self):
+        s = 'start_dim={start_dim}, end_dim={end_dim}'.format(**self.__dict__)
+        return s
 
 
 class DimShuffle(Module):
-    def __init__(self, input_shape, pattern):
+    def __init__(self, pattern, input_shape=None):
         super().__init__(input_shape)
         self.pattern = pattern
 
-    def forward(self, input, *args, **kwargs):
+    def forward(self, input: T.Tensor, *args, **kwargs):
         return utils.dimshuffle(input, self.pattern)
 
     @property
@@ -279,6 +288,6 @@ class DimShuffle(Module):
 
         return tuple([self.input_shape[i] if i != 'x' else 1 for i in self.pattern])
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, pattern={}) -> {}'.format(
-            self.input_shape, self.pattern, self.output_shape)
+    def extra_repr(self):
+        s = 'pattern={pattern}'.format(**self.__dict__)
+        return s

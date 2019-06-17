@@ -8,8 +8,10 @@ from collections import OrderedDict
 import numpy as np
 import torch as T
 import torch.nn as nn
+from torch.nn.modules.utils import _pair
 
 from neuralnet_pytorch import utils
+from neuralnet_pytorch.utils import _image_shape, _matrix_shape, _pointset_shape
 from neuralnet_pytorch.utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'wrapper',
@@ -22,14 +24,21 @@ class Net:
     def __init__(self, *args, **kwargs):
         self.optimizer = None
         self.scheduler = None
+        self.stats = {
+            'scalars': {},
+            'images': {},
+            'histograms': {},
+            'pointclouds': {},
+            'predictions': {}
+        }
 
-    def loss(self, *args, **kwargs):
+    def train_procedure(self, *args, **kwargs):
         raise NotImplementedError
 
     def learn(self, *args, **kwargs):
         raise NotImplementedError
 
-    def eval_loss(self, *args, **kwargs):
+    def eval_procedure(self, *args, **kwargs):
         raise NotImplementedError
 
 
@@ -37,8 +46,7 @@ class _LayerMethod:
     @property
     @utils.validate
     def output_shape(self):
-        assert not hasattr(super(), 'output_shape')
-        return None if self.input_shape is None else tuple(self.input_shape)
+        raise NotImplementedError
 
     @property
     def params(self):
@@ -90,55 +98,64 @@ class _LayerMethod:
         pass
 
 
+@utils.add_simple_repr
 class Module(nn.Module, _LayerMethod):
     def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
 class MultiSingleInputModule(nn.Module, _LayerMethod):
-    def __init__(self, *modules):
-        super().__init__()
+    def __init__(self, *modules_or_tensors):
+        assert all(isinstance(item, (nn.Module, T.Tensor)) for item in modules_or_tensors), \
+            'All items in modules_or_tensors should be Pytorch modules or tensors'
 
+        super().__init__()
         self.input_shape = []
-        for idx, module in enumerate(modules):
-            self.add_module('module%d' % idx, module)
-            self.input_shape.append(module.output_shape)
+
+        def foo(item):
+            idx = len(list(self.children()))
+            if isinstance(item, nn.Module):
+                self.add_module('module%d' % idx, item)
+                self.input_shape.append(item.output_shape)
+            else:
+                self.add_module('tensor%d' % idx, Lambda(lambda *args, **kwargs: item, input_shape=item.shape,
+                                                         output_shape=item.shape))
+                self.input_shape.append(item.shape)
+
+        list(map(foo, modules_or_tensors))
         self.input_shape = tuple(self.input_shape)
 
     def forward(self, input, *args, **kwargs):
-        outputs = [module(input, *args, **kwargs) for module in self.children()]
+        outputs = [module(input) for name, module in self.named_children()]
         return tuple(outputs)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
+    def trainable(self):
+        return tuple()
+
+    def params(self):
+        return tuple()
+
+    @property
+    def regularizable(self):
+        return tuple()
 
 
-class MultiMultiInputModule(nn.Module, _LayerMethod):
-    def __init__(self, *modules):
-        super().__init__()
+class MultiMultiInputModule(MultiSingleInputModule):
+    def __init__(self, *modules_or_tensors):
+        super().__init__(*modules_or_tensors)
 
-        self.input_shape = []
-        for idx, module in enumerate(modules):
-            self.add_module('module%d' % idx, module)
-            self.input_shape.append(module.output_shape)
-        self.input_shape = tuple(self.input_shape)
-
-    def forward(self, *input):
-        assert len(input) == len(list(self.children())), 'Number of inputs must be equal to number of modules'
-
-        outputs = [module(inp) for module, inp in zip(self.children(), input)]
+    def forward(self, *input, **kwargs):
+        input_it = iter(input)
+        outputs = [module(next(input_it)) if name.startswith('module') else module()
+                   for name, module in self.named_children()]
         return tuple(outputs)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
-
+@utils.add_simple_repr
 class Sequential(nn.Sequential, _LayerMethod):
-    def __init__(self, input_shape=None, *args):
+    def __init__(self, *args, input_shape=None):
         super().__init__(*args)
         self.input_shape = input_shape
 
@@ -160,16 +177,16 @@ class Sequential(nn.Sequential, _LayerMethod):
         for m in self.children():
             m.reset_parameters()
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
 
+def wrapper(layer: nn.Module, input_shape=None, *args, **kwargs):
+    assert isinstance(layer, nn.Module), 'layer must be a subclass of Pytorch\'s Module'
 
-def wrapper(input_shape, layer: nn.Module, *args, **kwargs):
+    @utils.add_simple_repr
     class _Wrapper(layer, _LayerMethod):
         def __init__(self):
+            self.input_shape = input_shape
             self.output_shape_tmp = kwargs.pop('output_shape', None)
             device = kwargs.pop('device', None)
-            self.input_shape = input_shape
 
             super().__init__(*args, **kwargs)
             if cuda_available:
@@ -192,20 +209,18 @@ def wrapper(input_shape, layer: nn.Module, *args, **kwargs):
                 dummy = T.zeros(*shape)
                 if cuda_available:
                     dummy.cuda()
+
                 dummy = self(dummy)
                 output_shape = list(dummy.shape)
                 for k in none_indices:
                     output_shape[k] = None
                 return tuple(output_shape)
 
-        def __repr__(self):
-            return super().__repr__() + ' -> {}'.format(self.output_shape)
-
     return _Wrapper
 
 
 class Lambda(Module):
-    def __init__(self, input_shape, func, output_shape=None, **kwargs):
+    def __init__(self, func, input_shape=None, output_shape=None, **kwargs):
         assert callable(func), 'The provided function must be callable'
 
         super().__init__(input_shape)
@@ -236,31 +251,27 @@ class Lambda(Module):
                 output_shape[k] = None
             return tuple(output_shape)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
+    def extra_repr(self):
+        s = '{}'.format(self.func.__name__)
+        return s
 
 
+@utils.add_simple_repr
 class Conv2d(nn.Conv2d, _LayerMethod):
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
                  bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
-        assert len(input_shape) == 4, 'input_shape must have 4 elements, got %d' % len(input_shape)
+        input_shape = _image_shape(input_shape)
         assert input_shape[1] is not None, 'Shape at dimension 1 (zero-based index) must be known'
-        assert isinstance(out_channels, int) and isinstance(kernel_size, (int, list, tuple))
-        assert isinstance(padding, (int, list, tuple,
-                                    str)), 'border_mode should be either \'int\', ' '\'list\', \'tuple\' or \'str\', got {}'.format(
-            type(padding))
-        assert isinstance(stride, (int, list, tuple)), 'stride must be an int/list/tuple, got %s' % type(stride)
 
         self.input_shape = input_shape
-        kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+        kernel_size = _pair(kernel_size)
         self.no_bias = bias
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else lambda x, **kwargs: activation(x)
+            else utils._wrap(activation)
         self.weights_init = weights_init
         self.bias_init = bias_init
         self.border_mode = padding
-        stride = tuple(stride) if isinstance(stride, (tuple, list)) else (stride, stride)
-        dilation = (dilation, dilation) if isinstance(dilation, int) else dilation
+        dilation = _pair(dilation)
         groups = groups
         self.kwargs = kwargs
 
@@ -269,15 +280,17 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             if padding == 'half':
                 padding = [k >> 1 for k in self.ks]
             elif padding in ('valid', 'ref', 'rep'):
-                padding = [0] * len(self.ks)
+                padding = (0,) * len(self.ks)
             elif padding == 'full':
                 padding = [k - 1 for k in self.ks]
             else:
                 raise NotImplementedError
         elif isinstance(padding, int):
-            padding = (padding, padding)
+            pass
+        else:
+            raise ValueError('padding must be a str/tuple/int, got %s' % type(padding))
 
-        super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, padding, dilation, bias=bias,
+        super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, tuple(padding), dilation, bias=bias,
                          groups=groups)
 
         if cuda_available:
@@ -294,9 +307,6 @@ class Conv2d(nn.Conv2d, _LayerMethod):
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
-
         shape = [np.nan if s is None else s for s in self.input_shape]
         padding = (self.ks[0] >> 1, self.ks[1] >> 1) if self.border_mode in ('ref', 'rep') else self.padding
         shape[2:] = [(s - self.ks[idx] + 2 * padding[idx]) // self.stride[idx] + 1 for idx, s in enumerate(shape[2:])]
@@ -311,21 +321,89 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
+    def extra_repr(self):
+        s = super().extra_repr()
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
+@utils.add_simple_repr
+class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
+    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
+                 dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, output_size=None, **kwargs):
+        input_shape = _image_shape(input_shape)
+        self.input_shape = input_shape
+        self.weights_init = weights_init
+        self.bias_init = bias_init
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
+        self.output_size = _pair(output_size)
+        self.kwargs = kwargs
+
+        if isinstance(padding, str):
+            if padding == 'half':
+                padding = (kernel_size[0] // 2, kernel_size[1] // 2)
+            elif padding == 'valid':
+                padding = (0, 0)
+            elif padding == 'full':
+                padding = (kernel_size[0] - 1, kernel_size[1] - 1)
+            else:
+                raise NotImplementedError
+        elif isinstance(padding, int):
+            padding = (padding, padding)
+
+        super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, padding, output_padding, groups, bias,
+                         dilation)
+
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
+
+    def forward(self, input, output_size=None, *args, **kwargs):
+        output = self.activation(super().forward(
+            input, output_size=self.output_size if output_size is None else output_size), **self.kwargs)
+        return output
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if self.output_size is not None:
+            return (self.input_shape[0], self.out_channels) + self.output_size
+
+        shape = [np.nan if s is None else s for s in self.input_shape]
+        _, _, h_in, w_in = shape
+        h_out = (h_in - 1) * self.stride[0] - 2 * self.padding[0] + self.dilation[0] * (self.kernel_size[0] - 1) + \
+                self.output_padding[0] + 1
+        w_out = (w_in - 1) * self.stride[1] - 2 * self.padding[1] + self.dilation[1] * (self.kernel_size[1] - 1) + \
+                self.output_padding[1] + 1
+        return self.input_shape[0], self.out_channels, h_out, w_out
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        if self.weights_init:
+            self.weights_init(self.weight)
+
+        if self.bias is not None and self.bias_init:
+            self.bias_init(self.bias)
+
+    def extra_repr(self):
+        s = 'activation={}'.format(self.activation.__name__)
+        return s
+
+
+@utils.add_simple_repr
 class FC(nn.Linear, _LayerMethod):
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
                  flatten=False, keepdim=True, **kwargs):
+        input_shape = _matrix_shape(input_shape)
         assert input_shape[-1] is not None, 'Shape at the last position (zero-based index) must be known'
+
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
         self.flatten = flatten
         self.keepdim = keepdim
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else lambda x, **kwargs: activation(x)
+            else utils._wrap(activation)
         self.kwargs = kwargs
 
         super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
@@ -343,9 +421,6 @@ class FC(nn.Linear, _LayerMethod):
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
-
         if self.flatten:
             return self.input_shape[0], self.out_features
         else:
@@ -359,27 +434,27 @@ class FC(nn.Linear, _LayerMethod):
         if self.bias is not None and self.bias_init:
             self.bias_init(self.bias)
 
-    def __repr__(self):
-        return super().__repr__() + ' -> {}'.format(self.output_shape)
+    def extra_repr(self):
+        s = super().extra_repr()
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
 class Softmax(FC):
     def __init__(self, input_shape, out_features, dim=1, weights_init=None, bias_init=None, **kwargs):
         self.dim = dim
-        super().__init__(input_shape, out_features,
-                         activation=lambda x, **kwargs: utils.function['softmax'](x, dim=dim, **kwargs),
-                         weights_init=weights_init, bias_init=bias_init, **kwargs)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, out_features={}, dim={}) -> {}'.format(
-            self.input_shape, self.out_features, self.dim, self.output_shape)
+        kwargs['dim'] = dim
+        super().__init__(input_shape, out_features, activation='softmax', weights_init=weights_init, bias_init=bias_init,
+                         **kwargs)
 
 
+@utils.add_simple_repr
+@utils.no_dim_change_op
 class Activation(Module):
-    def __init__(self, input_shape, activation='relu', **kwargs):
+    def __init__(self, activation='relu', input_shape=None, **kwargs):
         super().__init__(input_shape)
         self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else lambda x, **kwargs: activation(x)
+            else utils._wrap(activation)
         self.kwargs = kwargs
 
         if cuda_available:
@@ -388,79 +463,133 @@ class Activation(Module):
     def forward(self, input, *args, **kwargs):
         return self.activation(input, **self.kwargs)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}) -> {}'.format(self.activation, self.output_shape)
+    def extra_repr(self):
+        s = 'activation={}'.format(self.activation.__name__)
+        return s
 
 
+@utils.add_custom_repr
 class ConvNormAct(Sequential):
     def __init__(self, input_shape, out_channels, kernel_size, weights_init=None, bias=True, bias_init=None,
                  padding='half', stride=1, dilation=1, activation='relu', groups=1, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, no_scale=False, norm_method='bn', **kwargs):
-        super().__init__(input_shape)
-        from neuralnet_pytorch.normalization import BatchNorm2d
-        self.input_shape = input_shape
+        super().__init__(input_shape=input_shape)
+        from neuralnet_pytorch.normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
+
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.padding = padding
         self.stride = stride
         self.dilation = dilation
-        self.activation = activation
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
         self.norm_method = norm_method
         self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
                            bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
                            groups=groups, **kwargs)
-        if norm_method == 'bn':
-            self.norm = BatchNorm2d(self.conv.output_shape, eps, momentum, affine, track_running_stats,
-                                    no_scale=no_scale, activation=self.activation, **kwargs)
-        else:
-            raise NotImplementedError
+
+        norm_method = BatchNorm2d if norm_method == 'bn' else InstanceNorm2d if norm_method == 'in' \
+            else LayerNorm if norm_method == 'ln' else norm_method
+        assert isinstance(norm_method, Module)
+        self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
+                                no_scale=no_scale, activation=self.activation, **kwargs)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, padding={}, stride={}, activation={}) -> {}'.format(
-            self.input_shape, self.out_channels, self.kernel_size, self.padding, self.stride, self.activation,
-            self.output_shape)
-        return string
+    def extra_repr(self):
+        s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}')
+        if self.conv.padding != (0,) * len(self.conv.padding):
+            s += ', padding={padding}'
+        if self.conv.dilation != (1,) * len(self.conv.dilation):
+            s += ', dilation={dilation}'
+        if self.conv.output_padding != (0,) * len(self.conv.output_padding):
+            s += ', output_padding={output_padding}'
+        if self.conv.groups != 1:
+            s += ', groups={groups}'
+        if self.conv.bias is None:
+            s += ', bias=False'
+
+        s = s.format(**self.conv.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
-class ResNetBasicBlock(Sequential):
+@utils.add_custom_repr
+class FCNormAct(Sequential):
+    def __init__(self, input_shape, out_features, bias=True, weights_init=None, bias_init=None, flatten=False,
+                 keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
+                 no_scale=False, norm_method='bn', **kwargs):
+        super().__init__(input_shape=input_shape)
+        from neuralnet_pytorch.normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
+
+        self.out_features = out_features
+        self.flatten = flatten
+        self.keepdim = keepdim
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
+
+        self.fc = FC(self.input_shape, out_features, bias, weights_init=weights_init, bias_init=bias_init,
+                     flatten=flatten, keepdim=keepdim)
+
+        norm_method = BatchNorm1d if norm_method == 'bn' else InstanceNorm1d if norm_method == 'in' \
+            else LayerNorm if norm_method == 'ln' else FeatureNorm1d if norm_method == 'fn' else norm_method
+        assert isinstance(norm_method, Module)
+        self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
+                                no_scale=no_scale, activation=self.activation, **kwargs)
+
+        if cuda_available:
+            self.cuda(kwargs.pop('device', None))
+
+    def extra_repr(self):
+        s = '{in_features}, {out_features}'
+        if self.flatten:
+            s += 'flatten={flatten}'
+        if not self.keepdim:
+            s += 'keepdim={keepdim}'
+
+        s = s.format(**self.conv.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
+
+
+@utils.add_custom_repr
+class ResNetBasicBlock(Module):
     expansion = 1
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, weights_init=None, norm_method='bn', **kwargs):
-        super().__init__(input_shape)
-        self.input_shape = input_shape
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, dilation=(1, 1), activation='relu',
+                 downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
+        input_shape = _image_shape(input_shape)
+
+        super().__init__(input_shape=input_shape)
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
-        self.activation = utils.function[activation]
+        self.dilation = dilation
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
         self.groups = groups
         self.weights_init = weights_init
         self.norm_method = norm_method
         self.kwargs = kwargs
 
-        self.block = self._make_block() if block is None else block()
-        if stride > 1 or input_shape[1] != out_channels * self.expansion:
-            if downsample:
-                self.downsample = downsample
-            else:
+        self.block = self._make_block() if block is None else block(**kwargs)
+        if downsample is not None:
+            assert isinstance(Module, downsample), 'downsample must be an instance of Module, got %s' % type(downsample)
+            self.downsample = downsample
+        else:
+            if stride > 1 or input_shape[1] != out_channels * self.expansion:
                 self.downsample = ConvNormAct(input_shape, out_channels * self.expansion, 1, stride=stride, bias=False,
                                               weights_init=weights_init, activation='linear')
-            self.add_module('downsample', self.downsample)
-        else:
-            if downsample:
-                self.downsample = downsample
-                self.add_module('downsample', self.downsample)
             else:
-                self.downsample = lambda x: x
+                self.downsample = Lambda(lambda x: x, output_shape=input_shape, input_shape=input_shape)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
     def _make_block(self):
-        block = Sequential(self.input_shape)
+        block = Sequential(input_shape=self.input_shape)
         if self.expansion != 1:
             block.add_module('pre',
                              ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
@@ -482,98 +611,52 @@ class ResNetBasicBlock(Sequential):
         out += self.downsample(res)
         return self.activation(out, **self.kwargs)
 
-    def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={}) -> {}'.format(
-            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation, self.output_shape)
-        return string
+    def extra_repr(self):
+        s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}')
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+        if self.groups != 1:
+            s += ', groups={groups}'
+
+        s = s.format(**self.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.downsample.output_shape
 
 
 class ResNetBottleneckBlock(ResNetBasicBlock):
     expansion = 4
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, activation='relu', downsample=None, groups=1,
-                 block=None, weights_init=None, norm_method='bn', **kwargs):
-        super().__init__(input_shape, out_channels, kernel_size, stride, activation, downsample, groups, block=block,
-                         weights_init=weights_init, norm_method=norm_method, **kwargs)
-
-    def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, stride={}, activation={})'.format(
-            self.input_shape, self.out_channels, self.kernel_size, self.stride, self.activation)
-        return string
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, dilation=(1, 1), activation='relu',
+                 downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
+        super().__init__(input_shape, out_channels, kernel_size, stride=stride, dilation=dilation, activation=activation,
+                         downsample=downsample, groups=groups, block=block, weights_init=weights_init,
+                         norm_method=norm_method, **kwargs)
 
 
-class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
-    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
-                 dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, **kwargs):
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple. Received %s.' % type(
-            input_shape)
-        super().__init__()
-        self.input_shape = tuple(input_shape)
-        self.weights_init = weights_init
-        self.bias_init = bias_init
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else lambda x, **kwargs: activation(x)
-        stride = tuple(stride) if isinstance(stride, (tuple, list)) else (stride, stride)
-        dilation = (dilation, dilation) if isinstance(dilation, int) else tuple(dilation)
-        self.kwargs = kwargs
-
-        if isinstance(padding, str):
-            if padding == 'half':
-                padding = (kernel_size[0] // 2, kernel_size[1] // 2)
-            elif padding == 'valid':
-                padding = (0, 0)
-            elif padding == 'full':
-                padding = (kernel_size[0] - 1, kernel_size[1] - 1)
-            else:
-                raise NotImplementedError
-        elif isinstance(padding, int):
-            padding = (padding, padding)
-
-        self.convtrans = nn.ConvTranspose2d(int(input_shape[0]), out_channels, kernel_size, stride, padding,
-                                            output_padding, groups, bias, dilation)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
-    def forward(self, input, output_size=None, *args, **kwargs):
-        output = self.activation(super().forward(input, output_size=output_size), **self.kwargs)
-        return output
-
-    @property
-    @utils.validate
-    def output_shape(self):
-        if self.input_shape is None:
-            return None
-
-        shape = [np.nan if s is None else s for s in self.input_shape]
-        h = ((shape[1] - 1) * self.stride[0]) + self.kernel_size[0] + \
-            np.mod(shape[1] + 2 * self.padding[0] - self.kernel_size[0], self.stride[0]) - 2 * self.padding[0]
-        w = ((shape[2] - 1) * self.stride[1]) + self.kernel_size[1] + \
-            np.mod(shape[2] + 2 * self.padding[1] - self.kernel_size[1], self.stride[1]) - 2 * self.padding[1]
-        return self.input_shape[0], self.filter_shape[1], h, w
-
-    def reset_parameters(self):
-        super().reset_parameters()
-        if self.weights_init:
-            self.weights_init(self.weight)
-
-        if self.bias is not None and self.bias_init:
-            self.bias_init(self.bias)
-
-
+@utils.add_custom_repr
 class StackingConv(Sequential):
-    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=1,
+    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=(1, 1),
                  bias=True, weights_init=None, bias_init=None, norm_method=None, activation='relu', groups=1, **kwargs):
         assert num_layers > 1, 'num_layers must be greater than 1, got %d' % num_layers
-        super(StackingConv, self).__init__(input_shape)
+        input_shape = _image_shape(input_shape)
+
+        super(StackingConv, self).__init__(input_shape=input_shape)
         self.num_filters = out_channels
         self.filter_size = kernel_size
         self.stride = stride
-        self.activation = activation
+        self.dilation = dilation
+        self.groups = groups
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
         self.num_layers = num_layers
         self.norm_method = norm_method
 
-        self.block = nn.Sequential()
         shape = tuple(input_shape)
         conv_layer = partial(ConvNormAct, norm_method=norm_method) if norm_method else Conv2d
         for num in range(num_layers - 1):
@@ -590,16 +673,22 @@ class StackingConv(Sequential):
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
-    def __repr__(self):
-        string = self.__class__.__name__ + '({}, {}, {}, num_layers={}, stride={}, activation={}) -> {}'.format(
-            self.input_shape, self.num_filters, self.filter_size, self.num_layers, self.stride, self.activation,
-            self.output_shape)
-        return string
+    def extra_repr(self):
+        s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}, num_layers={num_layers}')
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+        if self.groups != 1:
+            s += ', groups={groups}'
+
+        s = s.format(**self.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
 class Sum(MultiSingleInputModule):
-    def __init__(self, *modules):
-        super().__init__(*modules)
+    def __init__(self, *modules_or_tensors):
+        super().__init__(*modules_or_tensors)
 
     def forward(self, input, *args, **kwargs):
         outputs = super().forward(input)
@@ -611,10 +700,10 @@ class Sum(MultiSingleInputModule):
         if None in self.input_shape:
             return None
 
-        return tuple(self.input_shape[0])
+        shapes_transposed = [item for item in zip(*self.input_shape)]
+        input_shape_none_filtered = list(map(utils.get_non_none, shapes_transposed))
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
+        return tuple(input_shape_none_filtered)
 
 
 class SequentialSum(Sum):
@@ -624,19 +713,22 @@ class SequentialSum(Sum):
     def forward(self, input, *args, **kwargs):
         outputs = []
         output = input
-        for module in self.children():
-            output = module(output)
-            outputs.append(output)
+        for name, module in self.named_children():
+            if name.startswith('tensor'):
+                outputs.append(module())
+            else:
+                output = module(output)
+                outputs.append(output)
 
         return sum(outputs)
 
 
 class ConcurrentSum(MultiMultiInputModule):
-    def __init__(self, *modules):
-        super().__init__(*modules)
+    def __init__(self, *modules_or_tensors):
+        super().__init__(*modules_or_tensors)
 
-    def forward(self, input, *args, **kwargs):
-        outputs = super().forward(input)
+    def forward(self, *input, **kwargs):
+        outputs = super().forward(*input)
         return sum(outputs)
 
     @property
@@ -645,16 +737,18 @@ class ConcurrentSum(MultiMultiInputModule):
         if None in self.input_shape:
             return None
 
-        return tuple(self.input_shape[0])
+        shapes_transposed = [item for item in zip(*self.input_shape)]
+        input_shape_none_filtered = list(map(utils.get_non_none, shapes_transposed))
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}) -> {}'.format(self.input_shape, self.output_shape)
+        return tuple(input_shape_none_filtered)
 
 
+@utils.add_custom_repr
 class DepthwiseSepConv2D(Sequential):
     """ Depthwise separable convolution"""
 
-    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', activation=None):
+    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', dilation=(1, 1),
+                 activation=None):
         """
         :param input_shape: Shape of input features
         :param out_channels: Length of output features (first dimension)
@@ -662,23 +756,40 @@ class DepthwiseSepConv2D(Sequential):
         :param depth_mul: Depth multiplier for middle part of separable convolution
         :param activation: Activation function
         """
-        super().__init__(input_shape)
+        input_shape = _image_shape(input_shape)
+
+        super().__init__(input_shape=input_shape)
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
         self.depth_mul = depth_mul
-        self.activation = activation
+        self.padding = padding
+        self.dilation = dilation
+        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
+            else utils._wrap(activation)
         self.add_module('depthwise', Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, padding=padding,
-                                            groups=input_shape[1]))
+                                            dilation=dilation, groups=input_shape[1]))
         self.add_module('pointwise', Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
-                                            bias=False))
+                                            dilation=dilation, bias=False))
 
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, {}, {}, depth_mul={}, padding={}, activation={}) -> {}'.format(
-            self.input_shape, self[-1].out_channels, self[0].kernel_size, self.depth_mul, self[0].padding,
-            self.activation, self.output_shape)
+    def extra_repr(self):
+        s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
+             ', depth_mul={depth_mul}')
+        if self.padding != 'half':
+            s += ', padding={padding}'
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+
+        s = s.format(**self.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
+@utils.add_custom_repr
 class XConv(Module):
     def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul,
                  activation='relu', dropout=None, bn=True):
+        input_shape = _pointset_shape(input_shape)
+
         super().__init__(input_shape)
         self.feature_dim = feature_dim
         self.out_channels = out_channels
@@ -689,7 +800,7 @@ class XConv(Module):
         self.dropout = dropout
         self.bn = bn
 
-        self.fcs = Sequential(input_shape)
+        self.fcs = Sequential(input_shape=input_shape)
         self.fcs.add_module('fc1', FC(self.fcs.output_shape, out_features, activation=activation))
         if dropout:
             self.fcs.add_module('dropout1', wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
@@ -700,7 +811,7 @@ class XConv(Module):
         from neuralnet_pytorch.resizing import DimShuffle
         from neuralnet_pytorch.normalization import BatchNorm2d
 
-        self.x_trans = Sequential(input_shape[:2] + (num_neighbors, input_shape[-1]))
+        self.x_trans = Sequential(input_shape=input_shape[:2] + (num_neighbors, input_shape[-1]))
         self.x_trans.add_module('dimshuffle1', DimShuffle(self.x_trans.output_shape, (0, 3, 1, 2)))
         self.x_trans.add_module('conv', Conv2d(self.x_trans.output_shape, num_neighbors ** 2, (1, num_neighbors),
                                                activation=activation, padding='valid'))
@@ -708,7 +819,7 @@ class XConv(Module):
         self.x_trans.add_module('fc1', FC(self.x_trans.output_shape, num_neighbors ** 2, activation='relu'))
         self.x_trans.add_module('fc2', FC(self.x_trans.output_shape, num_neighbors ** 2))
 
-        self.end_conv = Sequential(input_shape[:2] + (num_neighbors, feature_dim + out_features))
+        self.end_conv = Sequential(input_shape=input_shape[:2] + (num_neighbors, feature_dim + out_features))
         self.end_conv.add_module('dimshuffle1', DimShuffle(self.end_conv.output_shape, (0, 3, 1, 2)))
         self.end_conv.add_module('conv',
                                  DepthwiseSepConv2D(self.end_conv.output_shape, out_channels, (1, num_neighbors),
@@ -762,12 +873,13 @@ class XConv(Module):
     def output_shape(self):
         return self.input_shape[:2] + (self.out_channels,)
 
-    def __repr__(self):
-        return self.__class__.__name__ + \
-               '({}, feature_dim={}, out_channels={}, out_features={}, num_neighbors={}, depth_mul={}, ' \
-               'activation={}, dropout={}, bn={}) -> {}'.format(
-                   self.input_shape, self.feature_dim, self.out_channels, self.out_features, self.num_neighbors,
-                   self.depth_mul, self.activation, self.dropout, self.bn, self.output_shape)
+    def extra_repr(self):
+        s = ('{input_shape}, feature_dim={feature_dim}, out_channels={out_channels}, out_features={out_features}, '
+             'num_neighbors={num_neighbors}, depth_mul={depth_mul}, dropout={dropout}, bn={bn}')
+
+        s = s.format(**self.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s
 
 
 class GraphConv(FC):
@@ -777,7 +889,6 @@ class GraphConv(FC):
     """
 
     def __init__(self, input_shape, out_features, bias=True, activation=None):
-        self.input_shape = input_shape
         super().__init__(input_shape, out_features, bias, activation=activation)
 
     def reset_parameters(self):
@@ -803,6 +914,3 @@ class GraphConv(FC):
         if self.activation is not None:
             output = self.activation(output)
         return output
-
-    def __repr__(self):
-        return self.__class__.__name__ + '({}, {}) -> {}'.format(self.input_shape, self.out_features, self.output_shape)
