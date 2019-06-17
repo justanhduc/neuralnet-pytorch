@@ -490,7 +490,6 @@ class ConvNormAct(Sequential):
 
         norm_method = BatchNorm2d if norm_method == 'bn' else InstanceNorm2d if norm_method == 'in' \
             else LayerNorm if norm_method == 'ln' else norm_method
-        assert isinstance(norm_method, Module)
         self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
                                 no_scale=no_scale, activation=self.activation, **kwargs)
 
@@ -535,7 +534,6 @@ class FCNormAct(Sequential):
 
         norm_method = BatchNorm1d if norm_method == 'bn' else InstanceNorm1d if norm_method == 'in' \
             else LayerNorm if norm_method == 'ln' else FeatureNorm1d if norm_method == 'fn' else norm_method
-        assert isinstance(norm_method, Module)
         self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
                                 no_scale=no_scale, activation=self.activation, **kwargs)
 
