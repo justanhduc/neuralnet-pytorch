@@ -22,8 +22,11 @@ __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBa
 
 class Net:
     def __init__(self, *args, **kwargs):
-        self.optimizer = None
-        self.scheduler = None
+        self.optim = {
+            'optimizer': None,
+            'scheduler': None
+        }
+
         self.stats = {
             'scalars': {},
             'images': {},

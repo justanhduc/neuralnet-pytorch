@@ -260,9 +260,13 @@ class Monitor:
             'pointclouds': self.scatter,
             'predictions': self.confusion_matrix
         }
+
         start_epoch = self._last_epoch if start_epoch is None else start_epoch
         for epoch in range(start_epoch, n_epochs):
             self._last_epoch = epoch
+            if net.optim['scheduler'] is not None:
+                net.optim['scheduler'].step(epoch)
+
             for func_dict in self._schedule['beginning'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
@@ -413,10 +417,9 @@ class Monitor:
         value = tuple(utils.to_numpy(v) if isinstance(v, T.Tensor) else v for v in value)
         self._predictions_since_last_flush[name][self._iter] = value
 
-    def schedule(self, name, func, beginning=True, *args, **kwargs):
-        assert name is not None , 'name and func must be provided'
+    def schedule(self, func, beginning=True, *args, **kwargs):
         assert callable(func), 'func must be callable'
-
+        name = func.__name__
         when = 'beginning' if beginning else 'end'
         self._schedule[when][name]['func'] = func
         self._schedule[when][name]['args'] = args
