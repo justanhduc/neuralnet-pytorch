@@ -22,17 +22,27 @@ __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBa
 
 class Net:
     def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
         self.optim = {
             'optimizer': None,
             'scheduler': None
         }
 
-        self.stats = {
-            'scalars': {},
-            'images': {},
-            'histograms': {},
-            'pointclouds': {},
-            'predictions': {}
+        self.stats = {'train': {
+                'scalars': {},
+                'images': {},
+                'histograms': {},
+                'pointclouds': {},
+                'predictions': {}
+            },
+            'eval': {
+                'scalars': {},
+                'images': {},
+                'histograms': {},
+                'pointclouds': {},
+                'predictions': {}
+            }
         }
 
     def train_procedure(self, *args, **kwargs):
