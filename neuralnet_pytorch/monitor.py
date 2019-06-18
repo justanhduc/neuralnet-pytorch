@@ -283,10 +283,10 @@ class Monitor:
                                 for ii in range(len(batch_cuda[i])):
                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                    stats_dict = net.learn(*batch_cuda, *args, **kwargs)
+                    net.learn(*batch_cuda, *args, **kwargs)
 
                     if train_stats_func is None:
-                        for t, d in stats_dict.items():
+                        for t, d in net.stats['train'].items():
                             for k, v in d.items():
                                 if t == 'scalars':
                                     if np.isnan(v) or np.isinf(v):
@@ -294,7 +294,7 @@ class Monitor:
 
                                 collect[t](k, v)
                     else:
-                        train_stats_func(stats_dict)
+                        train_stats_func(net.stats['train'])
 
                     if valid_freq:
                         if it % valid_freq == 0:
@@ -318,10 +318,10 @@ class Monitor:
                                                 for ii in range(len(batch_cuda[i])):
                                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                                    eval_stats = net.eval_procedure(*batch_cuda, *args, **kwargs)
+                                    net.eval_procedure(*batch_cuda, *args, **kwargs)
 
                                     if val_stats_func is None:
-                                        for t, d in eval_stats.items():
+                                        for t, d in net.stats['eval'].items():
                                             if t in ('scalars', 'histograms', 'predictions'):
                                                 for k, v in d.items():
                                                     eval_dict[t][k].append(v)
@@ -329,7 +329,7 @@ class Monitor:
                                                 for k, v in d.items():
                                                     collect[t](k, v)
                                     else:
-                                        val_stats_func(eval_stats)
+                                        val_stats_func(net.stats['eval'])
 
                                 for t in ('scalars', 'histograms', 'predictions'):
                                     for k, v in eval_dict[t].items():
