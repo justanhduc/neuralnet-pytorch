@@ -39,14 +39,15 @@ def setup_package():
             'Development Status :: 3 - Alpha',
             'Intended Audience :: End Users/Desktop',
             'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
+            'Operating System :: Microsoft :: Windows :: Windows 10',
             'Operating System :: POSIX :: Linux',
             'Programming Language :: Python :: 3 :: Only',
-            'Programming Language :: Python :: 3.5'
-            'Programming Language :: Python :: 3.6'
+            'Programming Language :: Python :: 3.5',
+            'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7'
         ],
-        platforms=['Linux'],
-        packages=find_packages(exclude=['examples']),
+        platforms=['Windows', 'Linux'],
+        packages=find_packages(exclude=['docs']),
         ext_modules=[
             CUDAExtension('chamfer', [
                 'neuralnet_pytorch/extensions/chamfer_cuda.cpp',

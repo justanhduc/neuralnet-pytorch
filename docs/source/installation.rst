@@ -53,11 +53,11 @@ To install the bleeding-edge version, which is highly recommended, run ::
 
     pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
 
-For some special custom ops that we collect from other repositories, there are Cuda/C++ implementations
-which can be better in terms of speed and memory efficiency. To install the version with these bells
-and whistles, use ::
 
-    pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@linux
+We also provide a version with some fancy Cuda/C++ implementations
+collected on various sources. To install this version, run ::
+
+    pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@fancy
 
 Uninstall Neuralnet-pytorch
 ---------------------------

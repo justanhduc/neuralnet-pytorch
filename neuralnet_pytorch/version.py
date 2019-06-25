@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function, division
 from neuralnet_pytorch._version import get_versions
 
 author = 'DUC NGUYEN'
-FALLBACK_VERSION = "0.0.4+unknown"
+FALLBACK_VERSION = "1.0.0+unknown"
 
 info = get_versions()
 if info['error'] is not None:
@@ -18,7 +18,7 @@ short_version = full_version.split('+')[0]
 
 # This tries to catch a tag like beta2, rc1, ...
 try:
-    int(short_version.split('.')[2])
+    int(short_version.split('.')[0])
     release = True
 except ValueError:
     release = False

@@ -2,29 +2,47 @@ import numpy as np
 import torch as T
 from torch import nn
 from torch.nn import functional as F
+from torch.nn.modules.utils import _pair
 
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import _image_shape
 from neuralnet_pytorch.layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
-from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['UpsamplingLayer', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle',
-           'GlobalAvgPool2D', 'ConcurrentCat', 'SequentialCat']
+__all__ = ['Upsample', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D',
+           'ConcurrentCat', 'SequentialCat']
 
 
 @utils.add_simple_repr
-class UpsamplingLayer(nn.Upsample, _LayerMethod):
-    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=False, input_shape=None, **kwargs):
+class Upsample(nn.Upsample, _LayerMethod):
+    """
+    Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
+
+    Parameters
+    ----------
+    size
+        output spatial sizes. Optional.
+    scale_factor
+        multiplier for spatial size. Has to match input size if it is a tuple. Optional.
+    mode
+        the upsampling algorithm: one of ``'nearest'``,
+        ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
+        Default: ``'nearest'``.
+    align_corners
+        if ``True``, the corner pixels of the input
+        and output tensors are aligned, and thus preserving the values at
+        those pixels. This only has effect when `mode` is
+        ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``.
+    input_shape
+        shape of the input tensor. Optional.
+    """
+
+    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=False, input_shape=None):
         assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
                                                              'Received %s.' % type(scale_factor)
 
         self.input_shape = input_shape
-        scale_factor = ((scale_factor,) * (len(input_shape) - 2)) if isinstance(scale_factor, int) else tuple(
-            scale_factor)
+        scale_factor = _pair(scale_factor)
         super().__init__(size, scale_factor, mode, align_corners)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
@@ -42,6 +60,26 @@ class UpsamplingLayer(nn.Upsample, _LayerMethod):
 
 @utils.add_simple_repr
 class AvgPool2d(nn.AvgPool2d, _LayerMethod):
+    """
+    Applies a 2D average pooling over an input signal composed of several input
+    planes.
+
+    Parameters
+    ----------
+        kernel_size
+            the size of the window.
+        stride
+            the stride of the window. Default value is `kernel_size`.
+        padding
+            implicit zero padding to be added on both sides.
+        ceil_mode
+            when True, will use `ceil` instead of `floor` to compute the output shape.
+        count_include_pad
+            when True, will include the zero-padding in the averaging calculation.
+        input_shape
+            shape of the input image. Optional.
+    """
+
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False, input_shape=None):
         input_shape = _image_shape(input_shape)
         self.input_shape = input_shape
@@ -78,6 +116,29 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
 
 @utils.add_simple_repr
 class MaxPool2d(nn.MaxPool2d, _LayerMethod):
+    """
+    Applies a 2D max pooling over an input signal composed of several input
+    planes.
+
+    Parameters
+    ----------
+        kernel_size
+            the size of the window.
+        stride
+            the stride of the window. Default value is `kernel_size`.
+        padding
+            implicit zero padding to be added on both sides.
+        dilation
+            a parameter that controls the stride of elements in the window.
+        return_indices
+            if ``True``, will return the max indices along with the outputs.
+            Useful for :class:`torch.nn.MaxUnpool2d` later.
+        ceil_mode
+            when True, will use `ceil` instead of `floor` to compute the output shape.
+        input_shape
+            shape of the input image. Optional.
+    """
+
     def __init__(self, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False,
                  input_shape=None):
         input_shape = _image_shape(input_shape)
@@ -117,6 +178,18 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
 
 @utils.add_custom_repr
 class GlobalAvgPool2D(Module):
+    """
+    Applies a 2D global average pooling over an input signal composed of several input
+    planes.
+
+    Parameters
+    ----------
+    keepdim : bool
+        whether to keep the collapsed dim as (1, 1). Default: ``False``.
+    input_shape
+        shape of the input image. Optional.
+    """
+
     def __init__(self, keepdim=False, input_shape=None):
         input_shape = _image_shape(input_shape)
         super().__init__(input_shape)
@@ -141,6 +214,21 @@ class GlobalAvgPool2D(Module):
 
 
 class Cat(MultiSingleInputModule):
+    """
+    Concatenates the outputs of multiple modules given an input tensor.
+    A subclass of :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.Sum`
+    :class:`~neuralnet_pytorch.layers.SequentialSum`
+    :class:`~neuralnet_pytorch.layers.ConcurrentSum`
+    :class:`~neuralnet_pytorch.resizing.SequentialCat`
+    :class:`~neuralnet_pytorch.resizing.ConcurrentCat`
+    """
+
     def __init__(self, dim=1, *modules_or_tensors):
         super().__init__(*modules_or_tensors)
         self.dim = dim
@@ -169,6 +257,21 @@ class Cat(MultiSingleInputModule):
 
 
 class SequentialCat(Cat):
+    """
+    Concatenates the intermediate outputs of multiple sequential modules given an input tensor.
+    A subclass of :class:`~neuralnet_pytorch.resizing.Cat`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.Sum`
+    :class:`~neuralnet_pytorch.layers.SequentialSum`
+    :class:`~neuralnet_pytorch.layers.ConcurrentSum`
+    :class:`~neuralnet_pytorch.resizing.Cat`
+    :class:`~neuralnet_pytorch.resizing.ConcurrentCat`
+    """
+
     def __init__(self, dim=1, *modules_or_tensors):
         super().__init__(dim, *modules_or_tensors)
 
@@ -186,6 +289,21 @@ class SequentialCat(Cat):
 
 
 class ConcurrentCat(MultiMultiInputModule):
+    """
+    Concatenates the outputs of multiple modules given input tensors.
+    A subclass of :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.Sum`
+    :class:`~neuralnet_pytorch.layers.SequentialSum`
+    :class:`~neuralnet_pytorch.layers.ConcurrentSum`
+    :class:`~neuralnet_pytorch.resizing.Cat`
+    :class:`~neuralnet_pytorch.resizing.SequentialCat`
+    """
+
     def __init__(self, dim=1, *modules_or_tensors):
         super().__init__(*modules_or_tensors)
         self.dim = dim
@@ -214,6 +332,19 @@ class ConcurrentCat(MultiMultiInputModule):
 
 
 class Reshape(Module):
+    """
+    Reshapes the input tensor to the specified shape.
+
+    Parameters
+    ----------
+    shape
+        new shape of the tensor. One dim can be set to -1
+        to let :mod:`torch` automatically calculate the suitable
+        value.
+    input_shape
+        shape of the input tensor. Optional.
+    """
+
     def __init__(self, shape, input_shape=None):
         super().__init__(input_shape)
         self.new_shape = shape
@@ -247,6 +378,19 @@ class Reshape(Module):
 
 
 class Flatten(Module):
+    """
+    Collapses some adjacent dims.
+
+    Parameters
+    ----------
+    start_dim
+        dim where flattening starts.
+    end_dim
+        dim where flattening ends.
+    input_shape
+        shape of the input tensor. Optional.
+    """
+
     def __init__(self, start_dim=0, end_dim=-1, input_shape=None):
         super().__init__(input_shape)
         self.start_dim = start_dim
@@ -273,6 +417,21 @@ class Flatten(Module):
 
 
 class DimShuffle(Module):
+    """
+    Reorder the dimensions of this variable, optionally inserting
+    broadcasted dimensions.
+    Inspired by `Theano's dimshuffle`_.
+
+    .. _Theano's dimshuffle: https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356
+
+    Parameters
+    ----------
+    pattern
+        List/tuple of int mixed with 'x' for broadcastable dimensions.
+    input_shape
+        shape of the input tensor. Optional.
+    """
+
     def __init__(self, pattern, input_shape=None):
         super().__init__(input_shape)
         self.pattern = pattern

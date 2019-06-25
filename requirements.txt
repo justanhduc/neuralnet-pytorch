@@ -1,0 +1,6 @@
+visdom
+matplotlib
+slackclient
+tb-nightly
+imageio
+gin-config

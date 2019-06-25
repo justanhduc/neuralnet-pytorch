@@ -1,7 +1,3 @@
-"""
-Written by Duc Nguyen (Mar 21, 18)
-Updated Jan 13, 2019
-"""
 from functools import partial
 from collections import OrderedDict
 
@@ -10,6 +6,7 @@ import torch as T
 import torch.nn as nn
 from torch.nn.modules.utils import _pair
 
+import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import _image_shape, _matrix_shape, _pointset_shape
 from neuralnet_pytorch.utils import cuda_available
@@ -17,10 +14,42 @@ from neuralnet_pytorch.utils import cuda_available
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
            'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum',
-           'Net']
+           'Net', 'DepthwiseSepConv2D', 'FCNormAct']
 
 
 class Net:
+    """
+    This abstract class is useful when you want to use
+    :meth:`~neuralnet_pytorch.monitor.Monitor.run_training`.
+    For a start, subclass this as the first parent.
+    Then specify your optimization and schedule methods using :attr:`~optim`.
+    You can specify your training procedure in :attr:`~train_procedure` and
+    use :meth:`~learn` to perform optimization.
+    If :meth:`~eval_procedure` is specified,
+    Use :attr:`~stats` to collect your interested statistics from your training
+    and evaluation.
+    These statistics can be printed out or displayed in Tensorboard via
+    :class:`~neuralnet_pytorch.monitor.Monitor`.
+
+    Parameters
+    ----------
+    args
+        arguments to be passed to `super`.
+    kwargs
+        keyword arguments to be passed to `super`.
+
+    Attributes
+    ----------
+    optim
+        a dictionary that contains the optimizer and scheduler for optimization.
+    stats
+        a dictionary to hold the interested statistics from training and evaluation.
+        For each ```train``` and ```eval``` keys, an other dictionary with 5 keys
+        are defined.
+        The 5 keys are: ```scalars```, ```images```, ```histograms```,
+        and  ```pointclouds```.
+    """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -33,41 +62,72 @@ class Net:
                 'scalars': {},
                 'images': {},
                 'histograms': {},
-                'pointclouds': {},
-                'predictions': {}
+                'pointclouds': {}
             },
             'eval': {
                 'scalars': {},
                 'images': {},
                 'histograms': {},
-                'pointclouds': {},
-                'predictions': {}
+                'pointclouds': {}
             }
         }
 
     def train_procedure(self, *args, **kwargs):
+        """
+        Your training instructions can be specified here.
+        This can return the loss to be optimized in :meth:`~learn`.
+        You can use :attr:`~stats` to record the interested statistics.
+        """
+
         raise NotImplementedError
 
     def learn(self, *args, **kwargs):
+        """
+        The optimization can be defined here.
+        Usually, it includes zeroing gradients, optimizing the loss,
+        and collect statistics.
+        """
+
         raise NotImplementedError
 
     def eval_procedure(self, *args, **kwargs):
+        """
+        If specified, an evaluation will be performed for your model.
+        Use :attr:`~stats` to collect statistics.
+        """
+
         raise NotImplementedError
 
 
 class _LayerMethod:
+    """
+    This mixin class contains various attributes to extend :mod:`torch` modules.
+    """
+
     @property
     @utils.validate
     def output_shape(self):
+        """
+        Returns the output shape of the module.
+        """
+
         raise NotImplementedError
 
     @property
     def params(self):
+        """
+        Return a tuple of all the parameters in the module.
+        """
+
         assert not hasattr(super(), 'params')
         return tuple(self.state_dict().values())
 
     @property
     def trainable(self):
+        """
+        Return a tuple of all parameters with :attr:`requires_grad` set to `True`.
+        """
+
         assert not hasattr(super(), 'trainable')
         params = []
         if hasattr(self, 'parameters'):
@@ -76,6 +136,10 @@ class _LayerMethod:
 
     @property
     def regularizable(self):
+        """
+        Returns a tuple of parameters to be regularized.
+        """
+
         assert not hasattr(super(), 'regularizable')
         params = []
         if hasattr(self, 'weight'):
@@ -88,6 +152,13 @@ class _LayerMethod:
         return tuple(params)
 
     def save(self, param_file):
+        """
+        Save the weights of the model in :class:`numpy.nrdarray` format.
+
+        :param param_file:
+            path to the weight file.
+        """
+
         assert not hasattr(super(), 'save')
         params_np = utils.bulk_to_numpy(self.params)
         params_dict = OrderedDict(zip(list(self.state_dict().keys()), params_np))
@@ -95,6 +166,15 @@ class _LayerMethod:
         print('Model weights dumped to %s' % param_file)
 
     def load(self, param_file, eval=True):
+        """
+        Load the `numpy.ndarray` weights from file.
+
+        :param param_file:
+            path to the weight file.
+        :param eval:
+            whether to use evaluation mode or not.
+        """
+
         assert not hasattr(super(), 'load')
         params_dict = T.load(param_file)
         if cuda_available:
@@ -107,12 +187,29 @@ class _LayerMethod:
         print('Model weights loaded from %s' % param_file)
 
     def reset_parameters(self):
+        """
+        This overloads the :meth:`torch.Module.reset_parameters` of the module.
+        Used for custom weight initialization.
+        """
+
         assert not hasattr(super(), 'reset_parameters')
         pass
 
 
 @utils.add_simple_repr
 class Module(nn.Module, _LayerMethod):
+    """
+    Similar to :class:`torch.nn.Module`, but extended by
+    :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    All the usages in native Pytorch are preserved.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the tensor to be input to the modules.
+        Can be a list, tuple, nested list/tuple or an integer.
+    """
+
     def __init__(self, input_shape=None):
         super().__init__()
         self.input_shape = input_shape
@@ -120,6 +217,22 @@ class Module(nn.Module, _LayerMethod):
 
 @utils.add_simple_repr
 class MultiSingleInputModule(nn.Module, _LayerMethod):
+    """
+    This is an abstract class.
+    This class computes the results of multiple modules given an input tensor,
+    then fuses the results.
+
+    Parameters
+    ----------
+    modules_or_tensors
+        a list of modules or tensors whose results are fused together.
+
+    Attributes
+    ----------
+    input_shape
+        a list of input shapes of the incoming modules and tensors.
+    """
+
     def __init__(self, *modules_or_tensors):
         assert all(isinstance(item, (nn.Module, T.Tensor)) for item in modules_or_tensors), \
             'All items in modules_or_tensors should be Pytorch modules or tensors'
@@ -156,6 +269,10 @@ class MultiSingleInputModule(nn.Module, _LayerMethod):
 
 
 class MultiMultiInputModule(MultiSingleInputModule):
+    """
+    Similar to :class:`MultiSingleInputModule`, but each module has its own input tensor.
+    """
+
     def __init__(self, *modules_or_tensors):
         super().__init__(*modules_or_tensors)
 
@@ -168,6 +285,20 @@ class MultiMultiInputModule(MultiSingleInputModule):
 
 @utils.add_simple_repr
 class Sequential(nn.Sequential, _LayerMethod):
+    """
+    Similar to :class:`torch.nn.Sequential`, but extended by
+    :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    All the usages in native Pytorch are preserved.
+
+    Parameters
+    ----------
+    args
+        a list of modules as in :class:`torch.nn.Sequential`.
+    input_shape
+        shape of the input tensor. If ``None``, the functionality is
+        the same as :class:`torch.nn.Sequential`.
+    """
+
     def __init__(self, *args, input_shape=None):
         super().__init__(*args)
         self.input_shape = input_shape
@@ -191,14 +322,54 @@ class Sequential(nn.Sequential, _LayerMethod):
             m.reset_parameters()
 
 
-def wrapper(layer: nn.Module, input_shape=None, *args, **kwargs):
-    assert isinstance(layer, nn.Module), 'layer must be a subclass of Pytorch\'s Module'
+def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwargs):
+    """
+    A class decorator to wrap any :mod:`torch` module.
+
+    :param module:
+        a :mod:`torch` module.
+    :param input_shape:
+        shape of the input to the module.
+        Can be ``None``.
+    :param output_shape:
+        shape of the output tensor.
+        If ``None``, the output shape is calculated by performing a forward pass.
+    :param args:
+        extra arguments needed by the module.
+    :param kwargs:
+        extra keyword arguments needed by the module.
+    :return:
+        The input module extended by :class:`_LayerMethod`.
+
+    Examples
+    --------
+    You can use this function directly on any :mod:`torch` module
+
+    >>> import torch.nn as nn
+    >>> import neuralnet_pytorch as nnt
+    >>> dropout = nnt.wrapper(nn.Dropout2d, p=.2)() # because wrapper returns a class!
+
+    Alternatively, you can use it as a decorator
+
+    .. code-block:: python
+
+        import torch.nn as nn
+        import neuralnet_pytorch as nnt
+
+        @nnt.wrapper
+        class Foo(nn.Module):
+            ...
+
+        foo = Foo()
+    """
+
+    assert issubclass(module, nn.Module), 'module must be a subclass of Pytorch\'s Module'
 
     @utils.add_simple_repr
-    class _Wrapper(layer, _LayerMethod):
+    class _Wrapper(module, _LayerMethod):
         def __init__(self):
             self.input_shape = input_shape
-            self.output_shape_tmp = kwargs.pop('output_shape', None)
+            self.output_shape_tmp = output_shape
             device = kwargs.pop('device', None)
 
             super().__init__(*args, **kwargs)
@@ -229,10 +400,56 @@ def wrapper(layer: nn.Module, input_shape=None, *args, **kwargs):
                     output_shape[k] = None
                 return tuple(output_shape)
 
+    _Wrapper.__name__ = module.__name__
     return _Wrapper
 
 
 class Lambda(Module):
+    """
+    Wraps a function as a :class:`~neuralnet_pytorch.layers.Module`.
+
+    Parameters
+    ----------
+    func
+        a callable function.
+    input_shape
+        shape of the input tensor.
+    output_shape
+        shape of the output tensor.
+        If ``None``, the output shape is calculated by performing a forward pass.
+    kwargs
+        keyword arguments required by `func`.
+
+    Examples
+    --------
+    You can easily wrap a :mod:`torch` function
+
+    .. code-block:: python
+
+        import torch as T
+        import neuralnet_pytorch as nnt
+
+        a, b = T.rand(3, 1), T.rand(3, 2)
+        cat = nnt.Lambda(T.cat, dim=1)
+        c = cat((a, b))
+        print(c.shape)
+
+    Also, it works for any self-defined function as well
+
+    .. code-block:: python
+
+        import neuralnet_pytorch as nnt
+
+        def foo(x, y):
+            return x + y
+
+        a = T.rand(3, 3)
+        print(a)
+        foo_sum = nnt.Lambda(foo, y=1.)
+        res = foo_sum(a)
+        print(res)
+    """
+
     def __init__(self, func, input_shape=None, output_shape=None, **kwargs):
         assert callable(func), 'The provided function must be callable'
 
@@ -271,6 +488,45 @@ class Lambda(Module):
 
 @utils.add_simple_repr
 class Conv2d(nn.Conv2d, _LayerMethod):
+    """
+    Extends :class:`torch.nn.Conv2d` with :class:`~neuralnet_pytorch.layers._LayerMethod`.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    bias : bool
+        if ``True``, adds a learnable bias to the output. Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
                  bias=True, activation=None, weights_init=None, bias_init=None, **kwargs):
         input_shape = _image_shape(input_shape)
@@ -279,14 +535,12 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         self.input_shape = input_shape
         kernel_size = _pair(kernel_size)
         self.no_bias = bias
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.weights_init = weights_init
         self.bias_init = bias_init
         self.border_mode = padding
         dilation = _pair(dilation)
         groups = groups
-        self.kwargs = kwargs
 
         self.ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(kernel_size, dilation)]
         if isinstance(padding, str):
@@ -314,7 +568,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             (self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2,
              self.ks[0] // 2)) if self.border_mode == 'rep' else lambda x: x
         input = pad(input)
-        input = self.activation(super().forward(input), **self.kwargs)
+        input = self.activation(super().forward(input))
         return input
 
     @property
@@ -342,17 +596,61 @@ class Conv2d(nn.Conv2d, _LayerMethod):
 
 @utils.add_simple_repr
 class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
-    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, bias=True,
-                 dilation=1, weights_init=None, bias_init=None, activation='linear', groups=1, output_size=None, **kwargs):
+    """
+    Extends :class:`torch.nn.ConvTranspose2d` with :class:`~neuralnet_pytorch.layers._LayerMethod`.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        ``dilation * (kernel_size - 1) - padding`` zero-padding
+        will be added to both sides of each dimension in the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep``` which are common padding schemes.
+        Default: ```half```.
+    output_padding
+        additional size added to one side of each dimension in the output shape. Default: 0
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    bias : bool
+        if ``True``, adds a learnable bias to the output. Default: ``True``.
+    dilation
+        spacing between kernel elements. Default: 1.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    output_size
+        size of the output tensor. If ``None``, the shape is automatically determined.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
+    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', output_padding=0, groups=1,
+                 bias=True, dilation=1, activation='linear', weights_init=None, bias_init=None, output_size=None,
+                 **kwargs):
         input_shape = _image_shape(input_shape)
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
-        self.output_size = _pair(output_size)
-        self.kwargs = kwargs
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.output_size = _pair(output_size) if output_size is not None else None
 
+        kernel_size = _pair(kernel_size)
         if isinstance(padding, str):
             if padding == 'half':
                 padding = (kernel_size[0] // 2, kernel_size[1] // 2)
@@ -373,13 +671,15 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
 
     def forward(self, input, output_size=None, *args, **kwargs):
         output = self.activation(super().forward(
-            input, output_size=self.output_size if output_size is None else output_size), **self.kwargs)
+            input, output_size=self.output_size if output_size is None else output_size))
         return output
 
     @property
     @utils.validate
     def output_shape(self):
         if self.output_size is not None:
+            assert len(self.output_size) == 2, \
+                'output_size should have exactly 2 elements, got %d' % len(self.output_size)
             return (self.input_shape[0], self.out_channels) + self.output_size
 
         shape = [np.nan if s is None else s for s in self.input_shape]
@@ -405,6 +705,37 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
 
 @utils.add_simple_repr
 class FC(nn.Linear, _LayerMethod):
+    """
+    AKA fully connected layer in deep learning literature.
+    This class extends :class:`torch.nn.Linear` by :class:`~neuralnet_pytorch.layers._LayerMethod`.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the input tensor.
+        If an integer is passed, it is treated as the size of each input sample.
+    out_features : int
+        size of each output sample.
+    bias : bool
+        if set to ``False``, the layer will not learn an additive bias.
+        Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    flatten : bool
+        whether to flatten input tensor into 2D matrix. Default: ``False``.
+    keepdim : bool
+        whether to keep the output dimension when `out_features` is 1.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
                  flatten=False, keepdim=True, **kwargs):
         input_shape = _matrix_shape(input_shape)
@@ -415,9 +746,7 @@ class FC(nn.Linear, _LayerMethod):
         self.bias_init = bias_init
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
-        self.kwargs = kwargs
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
 
         super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
 
@@ -428,7 +757,7 @@ class FC(nn.Linear, _LayerMethod):
         if self.flatten:
             input = T.flatten(input, 1)
 
-        output = self.activation(super().forward(input), **self.kwargs)
+        output = self.activation(super().forward(input))
         return output.flatten(-2) if self.out_features == 1 and not self.keepdim else output
 
     @property
@@ -454,6 +783,26 @@ class FC(nn.Linear, _LayerMethod):
 
 
 class Softmax(FC):
+    """
+    A special case of :class:`~neuralnet_pytorch.layers.FC` with softmax activation function.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the input tensor.
+        If an integer is passed, it is treated as the size of each input sample.
+    out_features : int
+        size of each output sample.
+    dim : int
+        dimension to apply softmax. Default: 1.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
     def __init__(self, input_shape, out_features, dim=1, weights_init=None, bias_init=None, **kwargs):
         self.dim = dim
         kwargs['dim'] = dim
@@ -464,17 +813,31 @@ class Softmax(FC):
 @utils.add_simple_repr
 @utils.no_dim_change_op
 class Activation(Module):
+    """
+    Applies a non-linear function to the incoming input.
+
+    Parameters
+    ----------
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    input_shape
+        shape of the input tensor. Can be ``None``.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
     def __init__(self, activation='relu', input_shape=None, **kwargs):
         super().__init__(input_shape)
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
-        self.kwargs = kwargs
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
-        return self.activation(input, **self.kwargs)
+        return self.activation(input)
 
     def extra_repr(self):
         s = 'activation={}'.format(self.activation.__name__)
@@ -483,8 +846,67 @@ class Activation(Module):
 
 @utils.add_custom_repr
 class ConvNormAct(Sequential):
-    def __init__(self, input_shape, out_channels, kernel_size, weights_init=None, bias=True, bias_init=None,
-                 padding='half', stride=1, dilation=1, activation='relu', groups=1, eps=1e-5, momentum=0.1, affine=True,
+    """
+    Fuses convolution, normalization and activation together.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    bias : bool
+        if ``True``, adds a learnable bias to the output. Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    eps
+        a value added to the denominator for numerical stability.
+        Default: 1e-5.
+    momentum : float
+        the value used for the running_mean and running_var
+        computation. Can be set to ``None`` for cumulative moving average
+        (i.e. simple average). Default: 0.1.
+    affine
+        a boolean value that when set to ``True``, this module has
+        learnable affine parameters. Default: ``True``.
+    track_running_stats
+        a boolean value that when set to ``True``, this
+        module tracks the running mean and variance, and when set to ``False``,
+        this module does not track such statistics and always uses batch
+        statistics in both training and eval modes. Default: ``True``.
+    no_scale: bool
+        whether to use a trainable scale parameter. Default: ``True``.
+    norm_method
+        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
+        Default: ```bn```.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
+    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1, bias=True,
+                 activation='relu', weights_init=None, bias_init=None, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape=input_shape)
         from neuralnet_pytorch.normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
@@ -494,8 +916,7 @@ class ConvNormAct(Sequential):
         self.padding = padding
         self.stride = stride
         self.dilation = dilation
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.norm_method = norm_method
         self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
                            bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
@@ -530,8 +951,58 @@ class ConvNormAct(Sequential):
 
 @utils.add_custom_repr
 class FCNormAct(Sequential):
-    def __init__(self, input_shape, out_features, bias=True, weights_init=None, bias_init=None, flatten=False,
-                 keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
+    """
+    Fuses fully connected, normalization and activation together.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the input tensor.
+        If an integer is passed, it is treated as the size of each input sample.
+    out_features : int
+        size of each output sample.
+    bias : bool
+        if set to ``False``, the layer will not learn an additive bias.
+        Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    flatten : bool
+        whether to flatten input tensor into 2D matrix. Default: ``False``.
+    keepdim : bool
+        whether to keep the output dimension when `out_features` is 1.
+    eps
+        a value added to the denominator for numerical stability.
+        Default: 1e-5.
+    momentum : float
+        the value used for the running_mean and running_var
+        computation. Can be set to ``None`` for cumulative moving average
+        (i.e. simple average). Default: 0.1.
+    affine
+        a boolean value that when set to ``True``, this module has
+        learnable affine parameters. Default: ``True``.
+    track_running_stats
+        a boolean value that when set to ``True``, this
+        module tracks the running mean and variance, and when set to ``False``,
+        this module does not track such statistics and always uses batch
+        statistics in both training and eval modes. Default: ``True``.
+    no_scale: bool
+        whether to use a trainable scale parameter. Default: ``True``.
+    norm_method
+        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
+        Default: ```bn```.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
+    def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
+                 flatten=False, keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape=input_shape)
         from neuralnet_pytorch.normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
@@ -539,8 +1010,7 @@ class FCNormAct(Sequential):
         self.out_features = out_features
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
 
         self.fc = FC(self.input_shape, out_features, bias, weights_init=weights_init, bias_init=bias_init,
                      flatten=flatten, keepdim=keepdim)
@@ -567,9 +1037,59 @@ class FCNormAct(Sequential):
 
 @utils.add_custom_repr
 class ResNetBasicBlock(Module):
+    """
+    A basic block to build ResNet (https://arxiv.org/abs/1512.03385).
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    downsample
+        a module to process the residual branch when output shape is different from input shape.
+        If ``None``, a simple :class:`ConvNormAct` is used.
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    block
+        a function to construct the main branch of the block.
+        If ``None``, a simple block as described in the paper is used.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    norm_method
+        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
+        Default: ```bn```.
+    kwargs
+        extra keyword arguments to pass to activation.
+
+    Attributes
+    ----------
+    expansion : int
+        expansion coefficients of the number of output channels.
+        Default: 1.
+    """
+
     expansion = 1
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, dilation=(1, 1), activation='relu',
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
                  downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
         input_shape = _image_shape(input_shape)
 
@@ -577,9 +1097,9 @@ class ResNetBasicBlock(Module):
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.stride = stride
-        self.dilation = dilation
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.padding = padding
+        self.dilation = _pair(dilation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.groups = groups
         self.weights_init = weights_init
         self.norm_method = norm_method
@@ -592,7 +1112,7 @@ class ResNetBasicBlock(Module):
         else:
             if stride > 1 or input_shape[1] != out_channels * self.expansion:
                 self.downsample = ConvNormAct(input_shape, out_channels * self.expansion, 1, stride=stride, bias=False,
-                                              weights_init=weights_init, activation='linear')
+                                              padding=padding, weights_init=weights_init, activation='linear')
             else:
                 self.downsample = Lambda(lambda x: x, output_shape=input_shape, input_shape=input_shape)
 
@@ -604,23 +1124,24 @@ class ResNetBasicBlock(Module):
         if self.expansion != 1:
             block.add_module('pre',
                              ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
-                                         weights_init=self.weights_init, groups=self.groups))
+                                         padding=self.padding, weights_init=self.weights_init, groups=self.groups))
         block.add_module('conv_norm_act_1',
                          ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
-                                     weights_init=self.weights_init, stride=self.stride, activation=self.activation,
-                                     groups=self.groups, norm_method=self.norm_method, **self.kwargs))
+                                     padding=self.padding, weights_init=self.weights_init, stride=self.stride,
+                                     activation=self.activation, groups=self.groups, norm_method=self.norm_method,
+                                     **self.kwargs))
         block.add_module('conv_norm_act_2',
                          ConvNormAct(block.output_shape, self.out_channels * self.expansion,
                                      1 if self.expansion != 1 else self.kernel_size, bias=False, stride=1,
-                                     activation=None, groups=self.groups, weights_init=self.weights_init,
-                                     norm_method=self.norm_method, **self.kwargs))
+                                     padding=self.padding, activation=None, groups=self.groups,
+                                     weights_init=self.weights_init, norm_method=self.norm_method, **self.kwargs))
         return block
 
     def forward(self, input, *args, **kwargs):
         res = input
         out = self.block(input)
         out += self.downsample(res)
-        return self.activation(out, **self.kwargs)
+        return self.activation(out)
 
     def extra_repr(self):
         s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
@@ -641,35 +1162,128 @@ class ResNetBasicBlock(Module):
 
 
 class ResNetBottleneckBlock(ResNetBasicBlock):
+    """
+        A bottleneck block to build ResNet (https://arxiv.org/abs/1512.03385).
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    downsample
+        a module to process the residual branch when output shape is different from input shape.
+        If ``None``, a simple :class:`ConvNormAct` is used.
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    block
+        a function to construct the main branch of the block.
+        If ``None``, a simple block as described in the paper is used.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    norm_method
+        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
+        Default: ```bn```.
+    kwargs
+        extra keyword arguments to pass to activation.
+
+    Attributes
+    ----------
+    expansion : int
+        expansion coefficients of the number of output channels.
+        Default: 4.
+    """
+
     expansion = 4
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, dilation=(1, 1), activation='relu',
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
                  downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
-        super().__init__(input_shape, out_channels, kernel_size, stride=stride, dilation=dilation, activation=activation,
-                         downsample=downsample, groups=groups, block=block, weights_init=weights_init,
-                         norm_method=norm_method, **kwargs)
+        super().__init__(input_shape, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation,
+                         activation=activation, downsample=downsample, groups=groups, block=block,
+                         weights_init=weights_init, norm_method=norm_method, **kwargs)
 
 
 @utils.add_custom_repr
 class StackingConv(Sequential):
-    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=(1, 1),
-                 bias=True, weights_init=None, bias_init=None, norm_method=None, activation='relu', groups=1, **kwargs):
+    """
+    Stacks multiple convolution layers together.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size
+        size of the convolving kernel.
+    num_layer : int
+        number of convolutional layers.
+    stride
+        stride of the convolution. Default: 1.
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    bias : bool
+        if ``True``, adds a learnable bias to the output. Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    weights_init
+        a kernel initialization method from :mod:`torch.nn.init`.
+    bias_init
+        a bias initialization method from :mod:`torch.nn.init`.
+    norm_method
+        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
+        Default: ```bn```.
+    groups : int
+        number of blocked connections from input channels to output channels. Default: 1.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
+    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=1,
+                 bias=True, activation='relu', weights_init=None, bias_init=None, norm_method=None, groups=1, **kwargs):
         assert num_layers > 1, 'num_layers must be greater than 1, got %d' % num_layers
         input_shape = _image_shape(input_shape)
 
-        super(StackingConv, self).__init__(input_shape=input_shape)
+        super().__init__(input_shape=input_shape)
         self.num_filters = out_channels
         self.filter_size = kernel_size
         self.stride = stride
         self.dilation = dilation
         self.groups = groups
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.num_layers = num_layers
         self.norm_method = norm_method
 
         shape = tuple(input_shape)
-        conv_layer = partial(ConvNormAct, norm_method=norm_method) if norm_method else Conv2d
+        conv_layer = partial(ConvNormAct, norm_method=norm_method) if norm_method is not None else Conv2d
         for num in range(num_layers - 1):
             layer = conv_layer(input_shape=shape, out_channels=out_channels, kernel_size=kernel_size,
                                weights_init=weights_init, bias_init=bias_init, stride=1, padding=padding,
@@ -698,6 +1312,21 @@ class StackingConv(Sequential):
 
 
 class Sum(MultiSingleInputModule):
+    """
+    Sums the outputs of multiple modules given an input tensor.
+    A subclass of :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.SequentialSum`
+    :class:`~neuralnet_pytorch.layers.ConcurrentSum`
+    :class:`~neuralnet_pytorch.resizing.Cat`
+    :class:`~neuralnet_pytorch.resizing.SequentialCat`
+    :class:`~neuralnet_pytorch.resizing.ConcurrentCat`
+    """
+
     def __init__(self, *modules_or_tensors):
         super().__init__(*modules_or_tensors)
 
@@ -718,6 +1347,21 @@ class Sum(MultiSingleInputModule):
 
 
 class SequentialSum(Sum):
+    """
+    Sums the intermediate outputs of multiple sequential modules given an input tensor.
+    A subclass of :class:`~neuralnet_pytorch.layers.Sum`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.Sum`
+    :class:`~neuralnet_pytorch.layers.ConcurrentSum`
+    :class:`~neuralnet_pytorch.resizing.Cat`
+    :class:`~neuralnet_pytorch.resizing.SequentialCat`
+    :class:`~neuralnet_pytorch.resizing.ConcurrentCat`
+    """
+
     def __init__(self, *modules):
         super().__init__(*modules)
 
@@ -735,6 +1379,21 @@ class SequentialSum(Sum):
 
 
 class ConcurrentSum(MultiMultiInputModule):
+    """
+    Sums the outputs of multiple modules given input tensors.
+    A subclass of :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`.
+
+    See Also
+    --------
+    :class:`~neuralnet_pytorch.layers.MultiSingleInputModule`
+    :class:`~neuralnet_pytorch.layers.MultiMultiInputModule`
+    :class:`~neuralnet_pytorch.layers.Sum`
+    :class:`~neuralnet_pytorch.layers.SequentialSum`
+    :class:`~neuralnet_pytorch.resizing.Cat`
+    :class:`~neuralnet_pytorch.resizing.SequentialCat`
+    :class:`~neuralnet_pytorch.resizing.ConcurrentCat`
+    """
+
     def __init__(self, *modules_or_tensors):
         super().__init__(*modules_or_tensors)
 
@@ -756,17 +1415,41 @@ class ConcurrentSum(MultiMultiInputModule):
 
 @utils.add_custom_repr
 class DepthwiseSepConv2D(Sequential):
-    """ Depthwise separable convolution"""
+    """
+    Performs depthwise separable convolution in image processing.
 
-    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', dilation=(1, 1),
-                 activation=None):
-        """
-        :param input_shape: Shape of input features
-        :param out_channels: Length of output features (first dimension)
-        :param kernel_size: Size of convolutional kernel
-        :param depth_mul: Depth multiplier for middle part of separable convolution
-        :param activation: Activation function
-        """
+    Parameters
+    ----------
+    input_shape
+        shape of the 4D input image.
+        If a single integer is passed, it is treated as the number of input channels
+        and other sizes are unknown.
+    out_channels : int
+        number of channels produced by the convolution.
+    kernel_size : int
+        size of the convolving kernel.
+    depth_mul
+        depth multiplier for intermediate result of depthwise convolution
+    padding
+        zero-padding added to both sides of the input.
+        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
+        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
+        Default: ```half```.
+    dilation
+        spacing between kernel elements. Default: 1.
+    bias : bool
+        if ``True``, adds a learnable bias to the output. Default: ``True``.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+
+    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', dilation=1, bias=True,
+                 activation=None, **kwargs):
         input_shape = _image_shape(input_shape)
 
         super().__init__(input_shape=input_shape)
@@ -775,12 +1458,11 @@ class DepthwiseSepConv2D(Sequential):
         self.depth_mul = depth_mul
         self.padding = padding
         self.dilation = dilation
-        self.activation = utils.function[activation] if isinstance(activation, str) or activation is None \
-            else utils._wrap(activation)
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.add_module('depthwise', Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, padding=padding,
-                                            dilation=dilation, groups=input_shape[1]))
+                                            dilation=dilation, groups=input_shape[1], bias=bias))
         self.add_module('pointwise', Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
-                                            dilation=dilation, bias=False))
+                                            dilation=dilation, bias=False, **kwargs))
 
     def extra_repr(self):
         s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
@@ -797,8 +1479,40 @@ class DepthwiseSepConv2D(Sequential):
 
 @utils.add_custom_repr
 class XConv(Module):
-    def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul,
-                 activation='relu', dropout=None, bn=True):
+    """
+    Performs X-Convolution on unordered set as in `this paper`_.
+
+    .. _this paper: https://papers.nips.cc/paper/7362-pointcnn-convolution-on-x-transformed-points.pdf
+
+    Parameters
+    ----------
+    input_shape
+        shape of the input tensor.
+        If an integer is passed, it is treated as the size of each input sample.
+    feature_dim : int
+        dimension of the input features.
+    out_channels : int
+        number of channels produced by the convolution.
+    out_features : int
+        size of each output sample.
+    num_neighbors : int
+        size of the convolving kernel.
+    depth_mul
+        depth multiplier for intermediate result of depthwise convolution
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    dropout : bool
+        whether to use dropout.
+    bn : bool
+        whether to use batch normalization.
+    kwargs
+        extra keyword arguments to pass to activation.
+    """
+    def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul, activation='relu',
+                 dropout=None, bn=True, **kwargs):
         input_shape = _pointset_shape(input_shape)
 
         super().__init__(input_shape)
@@ -807,7 +1521,7 @@ class XConv(Module):
         self.num_neighbors = num_neighbors
         self.out_features = out_features
         self.depth_mul = depth_mul
-        self.activation = activation
+        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
         self.dropout = dropout
         self.bn = bn
 
@@ -825,17 +1539,17 @@ class XConv(Module):
         self.x_trans = Sequential(input_shape=input_shape[:2] + (num_neighbors, input_shape[-1]))
         self.x_trans.add_module('dimshuffle1', DimShuffle(self.x_trans.output_shape, (0, 3, 1, 2)))
         self.x_trans.add_module('conv', Conv2d(self.x_trans.output_shape, num_neighbors ** 2, (1, num_neighbors),
-                                               activation=activation, padding='valid'))
+                                               activation=activation, padding='valid', **kwargs))
         self.x_trans.add_module('dimshuffle2', DimShuffle(self.x_trans.output_shape, (0, 2, 3, 1)))
-        self.x_trans.add_module('fc1', FC(self.x_trans.output_shape, num_neighbors ** 2, activation='relu'))
-        self.x_trans.add_module('fc2', FC(self.x_trans.output_shape, num_neighbors ** 2))
+        self.x_trans.add_module('fc1', FC(self.x_trans.output_shape, num_neighbors ** 2, activation='relu', **kwargs))
+        self.x_trans.add_module('fc2', FC(self.x_trans.output_shape, num_neighbors ** 2, **kwargs))
 
         self.end_conv = Sequential(input_shape=input_shape[:2] + (num_neighbors, feature_dim + out_features))
         self.end_conv.add_module('dimshuffle1', DimShuffle(self.end_conv.output_shape, (0, 3, 1, 2)))
         self.end_conv.add_module('conv',
                                  DepthwiseSepConv2D(self.end_conv.output_shape, out_channels, (1, num_neighbors),
                                                     depth_mul=depth_mul, activation=None if bn else activation,
-                                                    padding='valid'))
+                                                    padding='valid', **kwargs))
         if bn:
             self.end_conv.add_module('bn', BatchNorm2d(self.end_conv.output_shape, momentum=.9, activation=activation))
         self.end_conv.add_module('dimshuffle2', DimShuffle(self.end_conv.output_shape, (0, 2, 3, 1)))
@@ -895,12 +1609,27 @@ class XConv(Module):
 
 class GraphConv(FC):
     """
-    Simple GCN layer, similar to https://arxiv.org/abs/1609.02907
-    Adapted from https://github.com/tkipf/pygcn/blob/master/pygcn/layers.py
+    Performs graph convolution as described in https://arxiv.org/abs/1609.02907.
+    Adapted from https://github.com/tkipf/pygcn/blob/master/pygcn/layers.py.
+
+    Parameters
+    ----------
+    input_shape
+        shape of the input tensor.
+        If an integer is passed, it is treated as the size of each input sample.
+    out_features : int
+        size of each output sample.
+    activation
+        non-linear function to activate the linear result.
+        It accepts any callable function
+        as well as a recognizable ``str``.
+        A list of possible ``str`` is in :func:`~neuralnet_pytorch.utils.function`.
+    kwargs
+        extra keyword arguments to pass to activation.
     """
 
-    def __init__(self, input_shape, out_features, bias=True, activation=None):
-        super().__init__(input_shape, out_features, bias, activation=activation)
+    def __init__(self, input_shape, out_features, bias=True, activation=None, **kwargs):
+        super().__init__(input_shape, out_features, bias, activation=activation, **kwargs)
 
     def reset_parameters(self):
         if self.weights_init is None:

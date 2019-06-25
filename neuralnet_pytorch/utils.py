@@ -4,18 +4,21 @@ import torch.nn.functional as F
 import abc
 import threading
 import warnings
+from torch.utils.data.dataloader import default_collate
 
 from queue import Queue
 from scipy.stats import truncnorm
 from PIL import Image
-from slackclient import SlackClient
 from torch._six import container_abcs
 from itertools import repeat
-from functools import wraps
+from functools import wraps, partial, update_wrapper
+
+try:
+    from slackclient import SlackClient
+except (ModuleNotFoundError, ImportError):
+    from slack import RTMClient as SlackClient
 
 cuda_available = T.cuda.is_available()
-
-__all__ = ['cuda_available', 'DataLoader']
 
 
 def _wrap(f):
@@ -40,7 +43,9 @@ _pointset_shape = _make_input_shape(2, 0)
 
 
 def validate(func):
-    """a decorator to make sure output shape is a list of ints"""
+    """
+    A decorator to make sure output shape is a tuple of ``int`` s.
+    """
 
     def wrapper(self):
         if func(self) is None:
@@ -53,7 +58,13 @@ def validate(func):
 
 
 def no_dim_change_op(cls):
-    """a decorator to add output_shape to an op that does not change the tensor shape"""
+    """
+    A decorator to overwrite :attr:`~neuralnet_pytorch.layers._LayerMethod.output_shape`
+    to an op that does not change the tensor shape.
+
+    :param cls:
+        a subclass of :class:`~neuralnet_pytorch.layers.Module`.
+    """
 
     @validate
     def output_shape(self):
@@ -64,7 +75,12 @@ def no_dim_change_op(cls):
 
 
 def add_simple_repr(cls):
-    """a decorator to add a simple repr to the designated class"""
+    """
+     A decorator to add a simple repr to the designated class.
+
+    :param cls:
+        a subclass of :class:`~neuralnet_pytorch.layers.Module`.
+     """
 
     def _repr(self):
         return super(cls, self).__repr__() + ' -> {}'.format(self.output_shape)
@@ -74,7 +90,12 @@ def add_simple_repr(cls):
 
 
 def add_custom_repr(cls):
-    """a decorator to add a custom repr to the designated class"""
+    """
+    A decorator to add a custom repr to the designated class.
+
+    :param cls:
+        a subclass of :class:`~neuralnet_pytorch.layers.Module`.
+    """
 
     def _repr(self):
         return self.__class__.__name__ + '({}) -> {}'.format(self.extra_repr(), self.output_shape)
@@ -97,6 +118,15 @@ def deprecated(new_func, version):
 
 
 def get_non_none(array):
+    """
+    Gets the first item that is not ``None`` from the given array.
+
+    :param array:
+        an arbitrary array that is iterable.
+    :return:
+        the first item that is not ``None``.
+    """
+
     try:
         e = next(item for item in array if item is not None)
     except StopIteration:
@@ -105,9 +135,21 @@ def get_non_none(array):
 
 
 class ThreadsafeIter:
-    """Takes an iterator/generator and makes it thread-safe by
-    serializing call to the `next` method of given iterator/generator.
     """
+    Takes an iterator/generator and makes it thread-safe by
+    serializing call to the `next` method of given iterator/generator.
+
+    Parameters
+    ----------
+    it
+        an iterable object.
+
+    Attributes
+    ----------
+    lock
+        a thread lock.
+    """
+
     def __init__(self, it):
         self.it = it
         self.lock = threading.Lock()
@@ -121,47 +163,74 @@ class ThreadsafeIter:
 
 
 def threadsafe_generator(generator):
-    """A decorator that takes a generator function and makes it thread-safe.
     """
+    A decorator that takes a generator function and makes it thread-safe.
+
+    :param generator:
+        a generator object.
+    :return:
+        a thread-safe generator.
+    """
+
     def safe_generator(*agrs, **kwargs):
         return ThreadsafeIter(generator(*agrs, **kwargs))
     return safe_generator
 
 
 class DataLoader(metaclass=abc.ABCMeta):
-    def __init__(self, dataset, batch_size, shuffle=False, num_workers=10, collate_fn=None, augmentation=None,
-                 apply_augmentation_to=(0,), num_cached=10, **kwargs):
-        """
-                A lightweight data loader. Works comparably to Pytorch's Dataloader when the workload is light, but it
-        initializes much faster. It can be a drop-in for Pytorch's Dataloader.
-        Usage: Subclass this class and define the load_data method. Optionally, generator can also be defined to specify
-        how to load.
+    """
+    A lightweight data loader. Works comparably to
+    Pytorch's :class:`torch.utils.data.Dataloader`
+    when the workload is light, but it
+    initializes much faster.
+    It is totally compatible with :class:`torch.utils.data.Dataset`
+    and can be a drop-in for :class:`torch.utils.data.Dataloader`.
 
-        :param dataset: an instance of Pytorch's Dataset
-        :param batch_size: batch size
-        :param shuffle: whether to shuffle in each iteration
-        :param augmentation: an instance of Pytorch's transform classes. Applicable to 4D image tensor
-        :param apply_augmentation_to: augmentation is only applied to the elements in a batch whose indices is specified
-            here
-        :param return_epoch: whether to return epoch or iteration number. Default iteration
-        :param infinite: whether to run inifinitely
-        :param num_cached: number of batches to be cached
-        :param num_workers: number of threads to be used
-        :param collate_fn: function to specify how a batch is loaded
-        :param kwargs:
-        """
+    Parameters
+    ----------
+    dataset
+        an instance of :class:`torch.utils.data.Dataset`.
+    batch_size
+        batch size
+    shuffle
+        whether to shuffle in each iteration.
+    num_workers
+        number of threads to be used.
+    collate_fn
+        function to specify how a batch is loaded.
+    num_cached
+        number of batches to be cached.
+    kwargs
+        arguments what will not be used.
+        For compatibility with :class:`torch.utils.data.Dataloader` only.
+
+    Attributes
+    ----------
+    batches
+        contains batches of data when iterating over the dataset.
+    _indices
+        contains the indeices of samples of the dataset.
+    num_batches
+        the number of batches in the dataset.
+    """
+
+    def __init__(self, dataset, batch_size, shuffle=False, num_workers=10, collate_fn=None, num_cached=10, **kwargs):
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.augmentation = augmentation
         self.num_cached = num_cached
-        self.apply_to = apply_augmentation_to
         self.num_workers = num_workers
-        self.collate_fn = collate_fn
-        self.kwargs = kwargs
+        self.collate_fn = default_collate if collate_fn is None else collate_fn
         self.batches = None
-        self.indices = None
+        self._indices = None
         self.num_batches = len(self.dataset) // self.batch_size
+
+        if len(kwargs.keys()) > 0:
+            warnings.warn(str(kwargs.keys()) +
+                          " are present for compatibility with "
+                          "`torch.utils.data.DataLoader` interface"
+                          " and will be ignored.",
+                          stacklevel=2)
 
     def __iter__(self):
         self.batches = self._get_batches()
@@ -172,38 +241,13 @@ class DataLoader(metaclass=abc.ABCMeta):
             self.batches = self._get_batches()
         return self.batches.__next__()
 
-    def _augment_minibatches(self, minibatches):
-        for batch in minibatches:
-            if isinstance(batch, (list, tuple)):
-                assert isinstance(self.apply_to, (list, tuple)), \
-                    'Expect a list of indices to which augmentation is applied. Got %s.' % type(self.apply_to)
-
-                for idx in self.apply_to:
-                    batch[idx] = [np.transpose(self.augmentation(
-                        Image.fromarray((np.transpose(img, (1, 2, 0)) * 255.).astype('uint8'), 'RGB')), (2, 0, 1)) for
-                                  img in batch[idx]]
-                    batch[idx] = np.stack(batch[idx]).astype('float32') / 255.
-            else:
-                batch = [np.transpose(self.augmentation(
-                        Image.fromarray((np.transpose(img, (1, 2, 0)) * 255.).astype('uint8'), 'RGB')), (2, 0, 1)) for
-                                  img in batch]
-                batch = np.stack(batch).astype('float32') / 255.
-            yield batch.astype
-
     def _get_batches(self):
         batches = self._generator()
-        if self.augmentation:
-            batches = self._augment_minibatches(batches)
-
         batches = self._generate_in_background(batches)
         for it, batch in enumerate(batches):
-            batch = T.tensor(batch) if isinstance(batch, np.ndarray) else [T.tensor(b) for b in batch]
             yield batch
 
     def _generate_in_background(self, generator):
-        """
-        Runs a generator in a background thread, caching up to `num_cached` items.
-        """
         generator = ThreadsafeIter(generator)
         queue = Queue(maxsize=self.num_cached)
 
@@ -230,38 +274,69 @@ class DataLoader(metaclass=abc.ABCMeta):
     def _generator(self):
         assert isinstance(self.dataset[0],
                           (list, tuple, np.ndarray)), 'Dataset should consist of lists/tuples or Numpy ndarray'
-        self.indices = np.arange(len(self.dataset))
+        self._indices = np.arange(len(self.dataset))
         if self.shuffle:
-            np.random.shuffle(self.indices)
+            np.random.shuffle(self._indices)
 
         for i in range(self.num_batches):
-            slice_ = self.indices[i * self.batch_size:(i + 1) * self.batch_size]
+            slice_ = self._indices[i * self.batch_size:(i + 1) * self.batch_size]
             batch = [self.dataset[s] for s in slice_]
-
-            if isinstance(batch, np.ndarray):
-                batch = np.stack(batch, 0)
-
-            if isinstance(batch, (list, tuple)):
-                batch = tuple([np.stack(b) for b in zip(*batch)]) if self.collate_fn is None else self.collate_fn(batch)
-
+            batch = self.collate_fn(batch)
             yield batch
 
 
 def truncated_normal(tensor, a=-1, b=1, mean=0., std=1.):
+    """
+    Initializes a tensor from a truncated normal distribution.
+
+    :param tensor:
+        a :class:`torch.Tensor`.
+    :param a:
+        lower bound of the truncated normal.
+    :param b:
+        higher bound of the truncated normal.
+    :param mean:
+        mean of the truncated normal.
+    :param std:
+        standard deviation of the truncated normal.
+    :return:
+        ``None``.
+    """
+
     values = truncnorm.rvs(a, b, loc=mean, scale=std, size=list(tensor.shape))
     with T.no_grad():
         tensor.data.copy_(T.tensor(values))
 
 
 def rgb2gray(img):
-    if img.ndimension() != 4:
-        raise ValueError('Input images must have four dimensions, not %d' % img.ndimension())
+    """
+    Converts a batch of RGB images to gray.
+
+    :param img:
+        an RGB image batch of any type.
+    :return:
+        a batch of gray images.
+    """
+
+    if len(img.shape) != 4:
+        raise ValueError('Input images must have four dimensions, not %d' % len(img.shape))
+
     return (0.299 * img[:, 0] + 0.587 * img[:, 1] + 0.114 * img[:, 2]).unsqueeze(1)
 
 
 def rgb2ycbcr(img):
-    if img.ndimension() != 4:
-        raise ValueError('Input images must have four dimensions, not %d' % img.ndimension())
+    """
+    Converts a batch of RGB images to YCbCr.
+
+    :param img:
+        an RGB image batch of any type.
+    :return:
+        a batch of YCbCr images.
+    """
+
+    if len(img.shape) != 4:
+        raise ValueError('Input images must have four dimensions, not %d' % len(img.shape))
+
     Y = 0. + .299 * img[:, 0] + .587 * img[:, 1] + .114 * img[:, 2]
     Cb = 128. - .169 * img[:, 0] - .331 * img[:, 1] + .5 * img[:, 2]
     Cr = 128. + .5 * img[:, 0] - .419 * img[:, 1] - .081 * img[:, 2]
@@ -269,40 +344,120 @@ def rgb2ycbcr(img):
 
 
 def ycbcr2rgb(img):
-    if img.ndimension() != 4:
-        raise ValueError('Input images must have four dimensions, not %d' % img.ndimension())
+    """
+    Converts a batch of YCbCr images to RGB.
+
+    :param img:
+        an YCbCr image batch of any type.
+    :return:
+        a batch of RGB images.
+    """
+
+    if len(img.shape) != 4:
+        raise ValueError('Input images must have four dimensions, not %d' % len(img.shape))
+
     R = img[:, 0] + 1.4 * (img[:, 2] - 128.)
     G = img[:, 0] - .343 * (img[:, 1] - 128.) - .711 * (img[:, 2] - 128.)
     B = img[:, 0] + 1.765 * (img[:, 1] - 128.)
     return T.cat((R.unsqueeze(1), G.unsqueeze(1), B.unsqueeze(1)), 1)
 
 
-def batch_get_value(params):
-    return tuple([to_numpy(p) for p in params])
-
-
 def batch_set_value(params, values):
+    """
+    Sets values of a tensor to another.
+
+    :param params:
+        a :class:`torch.Tensor`.
+    :param values:
+        a :class:`torch.Tensor` of the same shape as `params`.
+    :return:
+        ``None``.
+    """
+
     for p, v in zip(params, values):
         p.data.copy_(T.from_numpy(v))
 
 
 def to_numpy(x):
+    """
+    Moves a tensor to :mod:`numpy`.
+
+    :param x:
+        a :class:`torch.Tensor`.
+    :return:
+        a :class:`numpy.ndarray`.
+    """
+
     return x.cpu().detach().data.numpy()
 
 
 def to_cuda(x):
+    """
+    Moves a :mod:`numpy` to tensor.
+
+    :param x:
+        a :class:`numpy.ndarray`.
+    :return:
+        a :class:`torch.Tensor`.
+    """
+
     return T.from_numpy(x).cuda()
 
 
 def bulk_to_numpy(xs):
+    """
+    Moves a list of tensors to :class:`numpy.ndarray`.
+
+    :param xs:
+        a list/tuple of :class:`torch.Tensor` s.
+    :return:
+        a tuple of :class:`numpy.ndarray` s.
+    """
+
     return tuple([to_numpy(x) for x in xs])
 
 
 def bulk_to_cuda(xs):
+    """
+    Moves a list of :class:`numpy.ndarray` to tensors.
+
+    :param xs:
+        a tuple of :class:`numpy.ndarray` s.
+    :return:
+        a list/tuple of :class:`torch.Tensor` s.
+    """
+
     return tuple([to_cuda(x) for x in xs])
 
 
 def dimshuffle(x, pattern):
+    """
+    Reorders the dimensions of this variable, optionally inserting broadcasted dimensions.
+    Inspired by `Theano's dimshuffle`_.
+
+    .. _Theano's dimshuffle:
+        https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356
+
+    :param x:
+        Input tensor.
+    :param pattern:
+        List/tuple of int mixed with 'x' for broadcastable dimensions.
+    :return:
+        a tensor whose shape matches `pattern`.
+
+    Examples
+    --------
+    To create a 3D view of a [2D] matrix, call ``dimshuffle(x, [0,'x',1])``.
+    This will create a 3D view such that the
+    middle dimension is an implicit broadcasted dimension.  To do the same
+    thing on the transpose of that matrix, call ``dimshuffle(x, [1, 'x', 0])``.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.shape_padleft`
+    :func:`~neuralnet_pytorch.utils.shape_padright`
+    """
+
     assert isinstance(pattern, (list, tuple)), 'pattern must be a list/tuple'
     no_expand_pattern = [x for x in pattern if x != 'x']
     y = x.permute(*no_expand_pattern)
@@ -314,51 +469,116 @@ def dimshuffle(x, pattern):
 
 
 def shape_padleft(x, n_ones=1):
+    """
+    Reshape `x` by left-padding the shape with `n_ones` 1s.
+    Inspired by `Theano's shape_padleft`_.
+
+    .. _Theano's shape_padleft:
+        https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/basic.py#L4539-L4553
+
+    :param x:
+        variable to be reshaped.
+    :param n_ones:
+        number of 1s to pad.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.dimshuffle`
+    :func:`~neuralnet_pytorch.utils.shape_padright`
+    """
+
     pattern = ('x',) * n_ones + tuple(range(x.ndimension()))
     return dimshuffle(x, pattern)
 
 
 def shape_padright(x, n_ones=1):
+    """
+    Reshape `x` by right-padding the shape with `n_ones` 1s.
+    Inspired by `Theano's shape_padright`_.
+
+    .. _Theano's shape_padright:
+        https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/basic.py#L4557
+
+    :param x:
+        variable to be reshaped.
+    :param n_ones:
+        number of 1s to pad.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.dimshuffle`
+    :func:`~neuralnet_pytorch.utils.shape_padleft`
+    """
+
     pattern = tuple(range(x.ndimension())) + ('x',) * n_ones
     return dimshuffle(x, pattern)
 
 
-def ravel_index(indices, shape):
-    assert len(indices) == len(shape), 'Indices and shape must have the same length'
+def ravel_index(index, shape):
+    """
+    Finds the linear index of `index` of a tensor of shape `shape`
+    when it is flattened.
+
+    :param index:
+        a tuple of ``int`` s.
+    :param shape:
+        shape of the tensor.
+    :return:
+        the linear index of the element having `index`.
+
+    Examples
+    --------
+
+    >>> import torch as T
+    >>> import numpy as np
+    >>> import neuralnet_pytorch as nnt
+    >>> shape = (2, 3, 5)
+    >>> a = T.arange(np.prod(shape)).view(*shape)
+    >>> index = (1, 1, 3)
+    >>> print(a[index])  # 23
+    >>> linear_index = nnt.utils.ravel_index(index, shape)
+    >>> print(a.flatten()[linear_index])  # 23
+    """
+
+    assert len(index) == len(shape), 'indices and shape must have the same length'
     shape = T.tensor(shape)
     if cuda_available:
         shape = shape.cuda()
-    return sum([T.tensor(indices[i], dtype=shape.dtype) * T.prod(shape[i + 1:]) for i in range(len(shape))])
+
+    return sum([T.tensor(index[i], dtype=shape.dtype) * T.prod(shape[i + 1:]) for i in range(len(shape))])
 
 
 def smooth(x, beta=.9, window='hanning'):
-    """smooth the data using a window with requested size.
-
+    """
+    Smooths the data using a window with requested size.
     This method is based on the convolution of a scaled window with the signal.
     The signal is prepared by introducing reflected copies of the signal
     (with the window size) in both ends so that transient parts are minimized
     in the begining and end part of the output signal.
 
-    input:
-        x: the input signal
-        beta: the weighted moving average coeff. window length = 1 / (1 - beta)
-        window: the type of window from 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'
-            flat window will produce a moving average smoothing.
+    :param x:
+        the input signal.
+    :param beta:
+        the weighted moving average coeff. Window length is :math:`1 / (1 - \\beta)`.
+    :param window:
+        the type of window from ```flat```, ```hanning```, ```hamming```,
+        ```bartlett```, and ```blackman```.
+        Flat window will produce a moving average smoothing.
 
-    output:
-        the smoothed signal
+    :return:
+        the smoothed signal.
 
-    example:
+    Examples
+    --------
 
-    t=linspace(-2,2,0.1)
-    x=sin(t)+randn(len(t))*0.1
-    y=smooth(x)
+    .. code-block:: python
 
-    see also:
+        t = linspace(-2, 2, .1)
+        x = sin(t) + randn(len(t)) * .1
+        y = smooth(x)
 
-    numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
-    scipy.signal.lfilter
     """
+
     x = np.array(x)
     assert x.ndim == 1, 'smooth only accepts 1 dimension arrays'
     assert 0 < beta < 1, 'Input vector needs to be bigger than window size'
@@ -386,43 +606,92 @@ def smooth(x, beta=.9, window='hanning'):
 
 
 def slack_message(username, message, channel, token, **kwargs):
+    """
+    Sends a slack message to the specified chatroom.
+
+    :param username:
+        Slack username
+    :param message:
+        message to be sent.
+    :param channel:
+        Slack channel.
+    :param token:
+        Slack chatroom token.
+    :param kwargs:
+        additional keyword arguments to slack's :meth:`api_call`.
+    :return:
+        ``None``.
+    """
+
     sc = SlackClient(token)
     sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
 
 
 def relu(x, **kwargs):
+    """
+    ReLU activation.
+    """
+
     return T.relu(x)
 
 
 def linear(x, **kwargs):
+    """
+    Linear activation.
+    """
+
     return x
 
 
 def lrelu(x, **kwargs):
+    """
+    Leaky ReLU activation.
+    """
+
     return F.leaky_relu(x, kwargs.get('negative_slope', .2), kwargs.get('inplace', False))
 
 
 def tanh(x, **kwargs):
+    """
+    Hyperbolic tangent activation.
+    """
+
     return T.tanh(x)
 
 
 def sigmoid(x, **kwargs):
+    """
+    Sigmoid activation.
+    """
+
     return T.sigmoid(x)
 
 
 def elu(x, **kwargs):
+    """
+    ELU activation.
+    """
+
     return F.elu(x, kwargs.get('alpha', 1.), kwargs.get('inplace', False))
 
 
 def softmax(x, **kwargs):
+    """
+    Softmax activation.
+    """
+
     return T.softmax(x, kwargs.get('dim', None))
 
 
 def selu(x, **kwargs):
+    """
+    SELU activation.
+    """
+
     return T.selu(x)
 
 
-function = {
+act = {
     'relu': relu,
     'linear': linear,
     None: linear,
@@ -433,3 +702,21 @@ function = {
     'softmax': softmax,
     'selu': selu
 }
+
+
+def function(activation, **kwargs):
+    """
+    returns the `activation`.
+    Possible choices are
+    ``None``, ```linear```, ```relu```, ```lrelu```,
+    ```tanh```, ```sigmoid```, ```elu```, ```softmax```,
+    and ```selu```.
+
+    :param activation:
+        name of the activation function.
+    :return:
+        activation function
+    """
+
+    func = partial(act[activation], **kwargs)
+    return update_wrapper(func, act[activation])
