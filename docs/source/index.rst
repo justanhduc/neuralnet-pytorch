@@ -10,16 +10,26 @@ All the modules in the package directly subclass the corresponding modules from 
 so everything should still be familiar. For example, the following snippet in Pytorch ::
 
     from torch import nn
-    model = nn.Sequential()
-    model.add_module('conv1', nn.Conv2d(1, 20, 5, padding=2))
-    model.add_module('relu1', nn.ReLU())
-    model.add_module('conv2', nn.Conv2d(20, 64, 5, padding=2))
-    model.add_module('relu2', nn.ReLU())
+    model = nn.Sequential(
+        nn.Conv2d(1, 20, 5, padding=2),
+        nn.ReLU(),
+        nn.Conv2d(20, 64, 5, padding=2),
+        nn.ReLU()
+    )
+
 
 can be rewritten in Neuralnet-pytorch as ::
 
     import neuralnet_pytorch as nnt
-    model = nnt.Sequential((None, 1, None, None))
+    model = nnt.Sequential(
+        nnt.Conv2d(1, 20, 5, padding='half', activation='relu'),
+        nnt.Conv2d(20, 64, 5, padding='half', activation='relu')
+    )
+
+which is the same as the native Pytorch, or ::
+
+    import neuralnet_pytorch as nnt
+    model = nnt.Sequential(input_shape=1)
     model.add_module('conv1', nnt.Conv2d(model.output_shape, 20, 5, padding='half', activation='relu'))
     model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', activation='relu'))
 
@@ -28,14 +38,14 @@ find some reminiscence as many functions are highly inspired by Theano.
 
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: Overview:
 
    installation
-   reference-manual
+   manual/index
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 3
    :caption: Misc Notes:
 
    license

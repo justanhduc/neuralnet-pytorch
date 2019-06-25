@@ -17,7 +17,7 @@ def sanity_check(module1, module2, shape=None, *args):
     try:
         module1.load_state_dict(module2.state_dict())
     except RuntimeError:
-        params = nnt.utils.batch_get_value(module2.state_dict().values())
+        params = nnt.utils.bulk_to_numpy(module2.state_dict().values())
         nnt.utils.batch_set_value(module1.state_dict().values(), params)
 
     if shape is not None:
@@ -69,19 +69,19 @@ def test_track():
 
     conv1 = nnt.track('op', nnt.Conv2d(shape, 4, 3), 'all')
     conv2 = nnt.Conv2d(conv1.output_shape, 5, 3)
-    b = conv1(a)
-    c = nnt.track('conv2_output', conv2(b), 'all')
-    loss = T.sum(c ** 2)
+    intermediate = conv1(a)
+    output = nnt.track('conv2_output', conv2(intermediate), 'all')
+    loss = T.sum(output ** 2)
     loss.backward(retain_graph=True)
-    db = T.autograd.grad(loss, b, retain_graph=True)
-    dc = T.autograd.grad(loss, c)
+    d_inter = T.autograd.grad(loss, intermediate, retain_graph=True)
+    d_out = T.autograd.grad(loss, output)
     tracked = nnt.eval_tracked_variables()
 
-    testing.assert_allclose(tracked['conv2_output'], nnt.utils.to_numpy(c))
-    testing.assert_allclose(np.stack(tracked['grad_conv2_output']), nnt.utils.to_numpy(dc[0]))
-    testing.assert_allclose(tracked['op'], nnt.utils.to_numpy(b))
-    for db_, tracked_db_ in zip(db, tracked['grad_op_output']):
-        testing.assert_allclose(tracked_db_, nnt.utils.to_numpy(db_))
+    testing.assert_allclose(tracked['conv2_output'], nnt.utils.to_numpy(output))
+    testing.assert_allclose(np.stack(tracked['grad_conv2_output']), nnt.utils.to_numpy(d_out[0]))
+    testing.assert_allclose(tracked['op'], nnt.utils.to_numpy(intermediate))
+    for d_inter_, tracked_d_inter_ in zip(d_inter, tracked['grad_op_output']):
+        testing.assert_allclose(tracked_d_inter_, nnt.utils.to_numpy(d_inter_))
 
 
 def test_ravel_index():
@@ -628,6 +628,44 @@ def test_conv2d_layer():
 
     shape = (None, 3, None, None)
     conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride=2)
+    assert conv_nnt.output_shape == (None, 64, None, None)
+
+
+def test_convtranspose2d_layer():
+    shape = (64, 3, 32, 32)
+    n_filters = 64
+    filter_size = 3
+
+    # test constructors
+    conv_nnt = nnt.ConvTranspose2d(shape[1], n_filters, filter_size)
+    assert conv_nnt.output_shape == (None, n_filters, None, None)
+
+    conv_nnt = nnt.ConvTranspose2d((None, shape[1], None, None), n_filters, filter_size)
+    assert conv_nnt.output_shape == (None, n_filters, None, None)
+
+    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size)
+    conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=filter_size >> 1)
+    sanity_check(conv_nnt, conv_pt, shape)
+
+    stride = 2
+    new_size = tuple(i * stride for i in shape[2:])
+    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2, output_size=new_size)
+    conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=filter_size >> 1, stride=2)
+    input = T.rand(*shape)
+    if nnt.cuda_available:
+        input = input.cuda()
+        conv_pt = conv_pt.cuda()
+
+    out_nnt = conv_nnt(input)
+    out_pt = conv_pt(input, new_size)
+    assert conv_nnt.output_shape[2:] == out_nnt.shape[2:] == out_pt.shape[2:]
+
+    shape = (None, 3, None, 112)
+    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2)
+    assert conv_nnt.output_shape == (None, 64, None, 223)
+
+    shape = (None, 3, None, None)
+    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2)
     assert conv_nnt.output_shape == (None, 64, None, None)
 
 

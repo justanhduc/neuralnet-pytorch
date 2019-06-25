@@ -7,6 +7,32 @@ __all__ = ['NAdam', 'AdaBound', 'WarmRestart', 'InverseLR']
 
 
 class NAdam(optim.Adam):
+    """
+    Adaptive moment with Nesterov gradients.
+
+    http://cs229.stanford.edu/proj2015/054_report.pdf
+
+    Parameters
+    ----------
+    params
+        iterable of parameters to optimize or dicts defining
+        parameter groups
+    lr
+        learning rate (default: 1e-3)
+    betas
+        coefficients used for computing
+        running averages of gradient and its square (default: (0.9, 0.999))
+    eps
+        term added to the denominator to improve
+        numerical stability (default: 1e-8)
+    weight_decay
+        weight decay (L2 penalty) (default: 0)
+    decay
+        a decay scheme for `betas[0]`.
+        Default: :math:`\\beta * (1 - 0.5 * 0.96^{\\frac{t}{250}})`
+        where `t` is the training step.
+    """
+
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0,
                  decay=lambda x, t: x * (1. - .5 * .96 ** (t / 250.))):
         super().__init__(params, lr, betas, eps, weight_decay)
@@ -65,22 +91,34 @@ class NAdam(optim.Adam):
 
 
 class AdaBound(optim.Optimizer):
-    """Implements AdaBound algorithm.
+    """
+    Implements AdaBound algorithm.
     It has been proposed in `Adaptive Gradient Methods with Dynamic Bound of Learning Rate`_.
-    Arguments:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): Adam learning rate (default: 1e-3)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        final_lr (float, optional): final (SGD) learning rate (default: 0.1)
-        gamma (float, optional): convergence speed of the bound functions (default: 1e-3)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        amsbound (boolean, optional): whether to use the AMSBound variant of this algorithm
-    .. Adaptive Gradient Methods with Dynamic Bound of Learning Rate:
+
+    .. _Adaptive Gradient Methods with Dynamic Bound of Learning Rate:
         https://openreview.net/forum?id=Bkg3g2R9FX
+
+    Parameters
+    ----------
+    params
+        iterable of parameters to optimize or dicts defining.
+        parameter groups
+    lr
+        Adam learning rate. Default: 1e-3.
+    betas
+        coefficients used for computing running averages of gradient
+        and its square. Default: (0.9, 0.999).
+    final_lr
+        final (SGD) learning rate. Default: 0.1.
+    gamma
+        convergence speed of the bound functions. Default: 1e-3.
+    eps
+        term added to the denominator to improve
+        numerical stability. Default: 1e-8.
+    weight_decay
+        weight decay (L2 penalty). Default: 0.
+    amsbound : bool
+        whether to use the AMSBound variant of this algorithm.
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), final_lr=0.1, gamma=1e-3,
@@ -109,11 +147,6 @@ class AdaBound(optim.Optimizer):
             group.setdefault('amsbound', False)
 
     def step(self, closure=None):
-        """Performs a single optimization step.
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
         loss = None
         if closure is not None:
             loss = closure()
@@ -181,8 +214,8 @@ class AdaBound(optim.Optimizer):
 
 class WarmRestart(CosineAnnealingLR):
     """
-    step should be used in the inner loop, i.e., the iteration loop. Putting step in the epoch loop results in wrong
-    behavior of the restart.
+    Step should be used in the inner loop, i.e., the iteration loop.
+    Putting step in the epoch loop results in wrong behavior of the restart.
     One must not pass the iteration number to step.
     """
 
@@ -198,10 +231,19 @@ class WarmRestart(CosineAnnealingLR):
 
 
 class InverseLR(optim.lr_scheduler.LambdaLR):
-    """Decreases lr every iteration by the inverse of gamma times iteration plus 1
+    """Decreases lr every iteration by the inverse of gamma times iteration plus 1.
+    :math:`\\text{lr} = \\text{lr} / (1 + \\gamma * t)`.
 
-    lr = lr / (1 + gamma * t)
+    Parameters
+    ----------
+    optimizer
+        wrapped optimizer.
+    gamma
+        decrease coefficient.
+    last_epoch : int
+        the index of last epoch. Default: -1.
     """
+
     def __init__(self, optimizer, gamma, last_epoch=-1):
         self.gamma = gamma
         super().__init__(optimizer, lambda it: 1. / (1. + gamma * it), last_epoch)

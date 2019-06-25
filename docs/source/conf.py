@@ -12,10 +12,12 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
+sys.path.insert(0, os.path.abspath('../..'))
+import versioneer
 
+autodoc_mock_imports = ['torch', 'numpy', 'visdom', 'matplotlib', 'scipy', 'slackclient', 'tb-nightly', 'imageio']
 
 # -- Project information -----------------------------------------------------
 
@@ -23,11 +25,17 @@ project = 'Neuralnet-pytorch'
 copyright = '2019, Duc Nguyen'
 author = 'Duc Nguyen'
 
-# The short X.Y version
-version = ''
-# The full version, including alpha/beta/rc tags
-release = '0.0.4'
-
+# From Theano
+# We need this hokey-pokey because versioneer needs the current
+# directory to be the root of the project to work.
+_curpath = os.getcwd()
+os.chdir(os.path.join(os.path.dirname(os.path.dirname(__file__)), os.pardir))
+# The full version, including alpha/beta/rc tags.
+release = versioneer.get_version()
+# The short X.Y version.
+version = '.'.join(release.split('.')[:2])
+os.chdir(_curpath)
+del _curpath
 
 # -- General configuration ---------------------------------------------------
 
@@ -39,8 +47,24 @@ release = '0.0.4'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autosectionlabel'
+    'sphinx.ext.autosectionlabel',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.coverage',
+    'sphinx.ext.viewcode'
 ]
+
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+napoleon_include_init_with_doc = False
+napoleon_include_private_with_doc = False
+napoleon_include_special_with_doc = True
+napoleon_use_admonition_for_examples = False
+napoleon_use_admonition_for_notes = False
+napoleon_use_admonition_for_references = False
+napoleon_use_ivar = False
+napoleon_use_param = True
+napoleon_use_rtype = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -69,6 +93,9 @@ exclude_patterns = []
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
 
+# no pdf output
+sphinx_enable_pdf_build = False
+
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -76,7 +103,7 @@ pygments_style = None
 # a list of builtin themes.
 #
 html_theme = 'sphinx_rtd_theme'
-html_logo = '_static/pytorch-logo-150x150.png'
+html_logo = '_static/nnt-logo.png'
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
@@ -98,6 +125,7 @@ html_static_path = ['_static']
 #
 # html_sidebars = {}
 
+html_show_sourcelink = True
 
 # -- Options for HTMLHelp output ---------------------------------------------
 

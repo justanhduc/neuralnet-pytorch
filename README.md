@@ -69,10 +69,10 @@ Bleeding-edge version
 pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
 ```
 
-To install the version without some collected Cuda/C++ ops, use
+To install the version with some collected Cuda/C++ ops, use
 
 ```
-pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@plain
+pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@fancy
 ```
 
 # Usages
@@ -82,7 +82,7 @@ The manual reference is still under development and is available at https://neur
 # TODO
 
 - [x] Adding introduction and installation 
-- [ ] Writing documentations
+- [x] Writing documentations
 - [ ] Adding examples
 
 # Disclaimer
@@ -99,3 +99,5 @@ The CUDA Chamfer distance is taken from the [AtlasNet](https://github.com/Thibau
 The AdaBound optimizer is taken from its [official repo](https://github.com/Luolc/AdaBound).
 
 The adapted Gin for Pytorch code is taken from [Gin-config](https://github.com/google/gin-config).
+
+The monitor scheme is inspired from [WGAN](https://github.com/igul222/improved_wgan_training).

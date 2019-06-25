@@ -8,10 +8,27 @@ __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'ch
 
 
 def huber_loss(x, y, reduction='mean'):
+    """
+    An alias for :func:`torch.nn.functional.smooth_l1_loss`.
+    """
+
     return F.smooth_l1_loss(x, y, reduction)
 
 
 def first_derivative_loss(x, y, p=2):
+    """
+    Calculates lp loss between the first derivatives of the inputs.
+
+    :param x:
+        a :class:`torch.Tensor`.
+    :param y:
+        a :class:`torch.Tensor` of the same shape as x.
+    :param p:
+        order of the norm.
+    :return:
+        the scalar loss between the first derivatives of the inputs.
+    """
+
     if x.ndimension() != 4 and y.ndimension() != 4:
         raise TypeError('y and y_pred should have four dimensions')
     kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32')).requires_grad_(False)
@@ -36,14 +53,20 @@ def first_derivative_loss(x, y, p=2):
 
 def lp_loss(x, y, p=2, reduction='mean'):
     """
-    Calculates p-norm of (x - y)
+    Calculates p-norm of (x - y).
 
-    :param x: a Torch.tensor
-    :param y: a Torch.tensor of the same shape as x
-    :param p: order of the norm
-    :param reduction: 'mean' or 'sum'
-    :return: the p-norm of (x - y)
+    :param x:
+        a :class:`torch.Tensor`.
+    :param y:
+        a :class:`torch.Tensor` of the same shape as x.
+    :param p:
+        order of the norm.
+    :param reduction:
+        ```mean``` or ```sum```.
+    :return:
+        the p-norm of (x - y).
     """
+
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
 
@@ -57,23 +80,54 @@ def lp_loss(x, y, p=2, reduction='mean'):
 
 def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
     """
-    The Pytorch code is adapted from https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
-    The CUDA code is adapted from https://github.com/ThibaultGROUEIX/AtlasNet/tree/master/extension
+    Calculates the Chamfer distance between two batches of point clouds.
+    The Pytorch code is adapted from DenseLidarNet_.
+    The CUDA code is adapted from AtlasNet_.
 
-    :param xyz1: a point cloud of shape (b, n1, 3)
-    :param xyz2: a point cloud of shape (b, n2, 3)
-    :param reduce: 'mean' or 'sum'. Default is 'sum'
-    :param c_code: whether to use CUDA implementation. This version is much more memory-friendly and slightly faster
-    :return: the Chamfer distance between the two point clouds
+    .. _DenseLidarNet: https://github.com/345ishaan/DenseLidarNet/blob/master/code/chamfer_loss.py
+    .. _AtlasNet: https://github.com/ThibaultGROUEIX/AtlasNet/tree/master/extension
+
+    :param xyz1:
+        a point cloud of shape (b, n1, k).
+    :param xyz2:
+        a point cloud of shape (b, n2, k).
+    :param reduce:
+        ```mean``` or ```sum```. Default: ```sum```.
+    :param c_code:
+        whether to use CUDA implementation.
+        This version is much more memory-friendly and slightly faster.
+    :return:
+        the Chamfer distance between the inputs.
     """
+
     assert reduce in ('mean', 'sum'), 'Unknown reduce method'
     reduce = T.sum if reduce == 'sum' else T.mean
+
+    def batch_pairwise_dist(x, y):
+        bs, num_points_x, points_dim = x.size()
+        _, num_points_y, _ = y.size()
+        xx = T.bmm(x, x.transpose(2, 1))
+        yy = T.bmm(y, y.transpose(2, 1))
+        zz = T.bmm(x, y.transpose(2, 1))
+
+        if utils.cuda_available:
+            dtype = T.cuda.LongTensor
+        else:
+            dtype = T.LongTensor
+
+        diag_ind_x = T.arange(0, num_points_x).type(dtype)
+        diag_ind_y = T.arange(0, num_points_y).type(dtype)
+        # brk()
+        rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
+        ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
+        P = (rx.transpose(2, 1) + ry - 2 * zz)
+        return P
 
     if c_code:
         from .extensions import chamfer_distance
         dist1, dist2 = chamfer_distance(xyz1, xyz2)
     else:
-        P = utils.batch_pairwise_dist(xyz1, xyz2)
+        P = batch_pairwise_dist(xyz1, xyz2)
         dist2, _ = T.min(P, 1)
         dist1, _ = T.min(P, 2)
     loss_2 = reduce(dist2)
@@ -82,36 +136,42 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
 
 
 def _fspecial_gauss(size, sigma):
-    """Function to mimic the 'fspecial' gaussian MATLAB function
-    """
     x, y = np.mgrid[-size // 2 + 1:size // 2 + 1, -size // 2 + 1:size // 2 + 1]
     g = np.exp(-((x ** 2 + y ** 2) / (2.0 * sigma ** 2)))
     return g / np.sum(g)
 
 
 def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0.03, cs_map=False):
-    """Return the Structural Similarity Map between `img1` and `img2`.
+    """
+    Returns the Structural Similarity Map between `img1` and `img2`.
     This function attempts to match the functionality of ssim_index_new.m by
     Zhou Wang: http://www.cns.nyu.edu/~lcv/ssim/msssim.zip
-    Arguments:
-    img1: Numpy array holding the first RGB image batch.
-    img2: Numpy array holding the second RGB image batch.
-    max_val: the dynamic range of the images (i.e., the difference between the
-      maximum the and minimum allowed values).
-    filter_size: Size of blur kernel to use (will be reduced for small images).
-    filter_sigma: Standard deviation for Gaussian blur kernel (will be reduced
-      for small images).
-    k1: Constant used to maintain stability in the SSIM calculation (0.01 in
-      the original paper).
-    k2: Constant used to maintain stability in the SSIM calculation (0.03 in
-      the original paper).
-    Returns:
-    Pair containing the mean SSIM and contrast sensitivity between `img1` and
-    `img2`.
-    Raises:
-    RuntimeError: If input images don't have the same shape or don't have four
-      dimensions: [batch_size, height, width, depth].
+
+    :param img1:
+        a 4D :class:`torch.Tensor`.
+    :param img2:
+        a 4D :class:`torch.Tensor` of the same shape as `img1`.
+    :param max_val:
+        the dynamic range of the images (i.e., the difference between the
+        maximum the and minimum allowed values).
+    :param filter_size:
+        size of blur kernel to use (will be reduced for small images).
+    :param filter_sigma:
+        standard deviation for Gaussian blur kernel (will be reduced
+        for small images).
+    :param k1:
+        constant used to maintain stability in the SSIM calculation (0.01 in
+        the original paper).
+    :param k2:
+        constant used to maintain stability in the SSIM calculation (0.03 in
+        the original paper).
+    :return:
+        pair containing the mean SSIM and contrast sensitivity between `img1` and `img2`.
+    :raise:
+        RuntimeError: If input images don't have the same shape or don't have four
+        dimensions: [batch_size, height, width, depth].
     """
+
     if img1.ndimension() != 4:
         raise RuntimeError('Input images must have four dimensions, not %d', img1.ndimension())
 
@@ -159,5 +219,13 @@ def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
 
 
 def psnr(x, y):
-    """PSNR for [0,1] images"""
+    """
+    Peak-signal-to-noise ratio for [0,1] images.
+
+    :param x:
+        a :class:`torch.Tensor`.
+    :param y:
+        a :class:`torch.Tensor` of the same shape as `x`.
+    """
+
     return -10 * T.log(T.mean((y - x) ** 2)) / np.log(10.)

@@ -40,12 +40,12 @@ def setup_package():
             'Operating System :: Microsoft :: Windows :: Windows 10',
             'Operating System :: POSIX :: Linux',
             'Programming Language :: Python :: 3 :: Only',
-            'Programming Language :: Python :: 3.5'
-            'Programming Language :: Python :: 3.6'
+            'Programming Language :: Python :: 3.5',
+            'Programming Language :: Python :: 3.6',
             'Programming Language :: Python :: 3.7'
         ],
         platforms=['Windows', 'Linux'],
-        packages=find_packages(exclude=['examples']),
+        packages=find_packages(exclude=['docs']),
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
         project_urls={

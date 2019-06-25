@@ -1,9 +1,3 @@
-"""
-Original version from https://github.com/igul222/improved_wgan_training
-Collected and modified by Nguyen Anh Duc
-updated Jan 14, 2019
-"""
-
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
 
@@ -24,15 +18,11 @@ import visdom
 from shutil import copyfile
 import torch as T
 import torch.nn as nn
-from sklearn.metrics import confusion_matrix
-from sklearn.utils.multiclass import unique_labels
-import distutils.version
 
-minimum_required = '1.1.0'
-if distutils.version.LooseVersion(T.__version__) < distutils.version.LooseVersion(minimum_required):
-    from tensorboardX import SummaryWriter
-else:
+try:
     from torch.utils.tensorboard import SummaryWriter
+except ImportError:
+    from tensorboardX import SummaryWriter
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
@@ -43,13 +33,56 @@ hooks = {}
 
 
 def track(name, x, direction=None):
+    """
+    An identity function that registers hooks to
+    track the value and gradient of the specified tensor.
+
+    Here is an example of how to track an intermediate output ::
+
+        input = ...
+        conv1 = nnt.track('op', nnt.Conv2d(shape, 4, 3), 'all')
+        conv2 = nnt.Conv2d(conv1.output_shape, 5, 3)
+        intermediate = conv1(input)
+        output = nnt.track('conv2_output', conv2(intermediate), 'all')
+        loss = T.sum(output ** 2)
+        loss.backward(retain_graph=True)
+        d_inter = T.autograd.grad(loss, intermediate, retain_graph=True)
+        d_out = T.autograd.grad(loss, output)
+        tracked = nnt.eval_tracked_variables()
+
+        testing.assert_allclose(tracked['conv2_output'], nnt.utils.to_numpy(output))
+        testing.assert_allclose(np.stack(tracked['grad_conv2_output']), nnt.utils.to_numpy(d_out[0]))
+        testing.assert_allclose(tracked['op'], nnt.utils.to_numpy(intermediate))
+        for d_inter_, tracked_d_inter_ in zip(d_inter, tracked['grad_op_output']):
+            testing.assert_allclose(tracked_d_inter_, nnt.utils.to_numpy(d_inter_))
+
+    :param name:
+        name of the tracked tensor.
+    :param x:
+        tensor or module to be tracked.
+        If module, the output of the module will be tracked.
+    :param direction:
+        there are 4 options
+
+        ``None``: tracks only value.
+
+        ```forward```: tracks only value.
+
+        ```backward```: tracks only gradient.
+
+        ```all``: tracks both value and gradient.
+
+        Default: ``None``.
+    :return: `x`.
+    """
+
     assert isinstance(name, str), 'name must be a string, got %s' % type(name)
     assert isinstance(x, (T.nn.Module, T.Tensor)), 'x must be a Torch Module or Tensor, got %s' % type(x)
     assert direction in (
         'forward', 'backward', 'all', None), 'direction must be None, \'forward\', \'backward\', or \'all\''
 
     if isinstance(x, T.nn.Module):
-        if direction in ('forward', 'all'):
+        if direction in ('forward', 'all', None):
             def _forward_hook(module, input, output):
                 _TRACKS[name] = output.detach()
 
@@ -74,6 +107,19 @@ def track(name, x, direction=None):
 
 
 def get_tracked_variables(name=None, return_name=False):
+    """
+    Gets tracked variable given name.
+
+    :param name:
+        name of the tracked variable.
+        can be ``str`` or``list``/``tuple`` of ``str``s.
+        If ``None``, all the tracked variables will be returned.
+    :param return_name:
+        whether to return the names of the tracked variables.
+    :return:
+        the tracked variables.
+    """
+
     assert isinstance(name, (str, list, tuple)) or name is None, 'name must either be None, a tring, or a list/tuple.'
     if name is None:
         tracked = ([n for n in _TRACKS.keys()], [val for val in _TRACKS.values()]) if return_name \
@@ -88,6 +134,13 @@ def get_tracked_variables(name=None, return_name=False):
 
 
 def eval_tracked_variables():
+    """
+    Retrieves the values of tracked variables.
+
+    :return: a dictionary containing the values of tracked variables
+        associated with the given names.
+    """
+
     name, vars = get_tracked_variables(return_name=True)
     dict = collections.OrderedDict()
     for n, v in zip(name, vars):
@@ -103,20 +156,67 @@ def _spawn_defaultdict_ordereddict():
 
 
 class Monitor:
+    """
+    Collects statistics and displays the results using various backends.
+    The collected stats are stored in '<root>/<model_name>/run<#id>'
+    where #id is automatically assigned each time a new run starts.
+
+    Examples
+    --------
+    The following snippet shows how to collect statistics and display them
+    every 100 iterations.
+
+    .. code-block:: python
+
+        import neuralnet as nnt
+
+        ...
+        mon = nnt.Monitor(model_name='my_model', print_freq=100)
+        for epoch in n_epochs:
+            for data in data_loader:
+                with mon:
+                    loss = net(data)
+                    mon.plot('training loss', loss)
+                    mon.imwrite('input images', data['images'])
+        ...
+
+    Parameters
+    ----------
+    model_name : str
+        name of the model folder.
+    root : str
+        path to store the collected statistics.
+    current_folder : str
+        if given, all the stats in here will be overwritten or resumed.
+    print_freq : int
+        statistics display frequency. Used only in context manager mode.
+    num_iters : int
+        number of iterations/epoch.
+        If specified, training iteration percentage will be displayed along with epoch.
+    use_visdom : bool
+        whether to use Visdom for real-time monitoring.
+    use_tensorboard : bool
+        whether to use Tensorboard for real-time monitoring.
+    send_slack : bool
+        whether to send the statistics to Slack chatroom.
+    kwargs
+        some miscellaneous options for Visdom and other functions.
+
+    Attributes
+    ----------
+    path
+        contains all the runs of `model_name`.
+    current_folder
+        path to the current run.
+    vis
+        an instance of :mod:`Visdom` when `~use_visdom` is set to ``True``.
+    writer
+        an instance of Tensorboard's :class:`SummaryWriter`
+        when `~use_tensorboard` is set to ``True``.
+    """
+
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
                  use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
-        """Collects statistics and displays the results using various backends. The collected stats are stored in
-        '<root>/<model_name>/run<#id>' where #id is automatically assigned each time an instance is constructed.
-
-        :param model_name: name of the model folder
-        :param root: path to store the collected statistics
-        :param current_folder: if given, all the stats in here will be overwritten or resumed
-        :param print_freq: statistics display frequency
-        :param num_iters: number of iterations/epoch. if given, training iteration percentage will be displayed along with epoch no
-        :param use_visdom: whether to use Visdom for real-time monitoring
-        :param use_tensorboard: whether to use Tensorboard for real-time monitoring
-        :param kwargs: some miscellaneous options for Visdom and other functions
-        """
         self._iter = 0
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
@@ -125,7 +225,6 @@ class Monitor:
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._predictions_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
         self._schedule = {'beginning': collections.defaultdict(_spawn_defaultdict_ordereddict),
                           'end': collections.defaultdict(_spawn_defaultdict_ordereddict)}
@@ -141,17 +240,17 @@ class Monitor:
             try:
                 log = self.read_log('log.pkl')
                 try:
-                    self.set_num_stats(log['num'])
+                    self._set_num_stats(log['num'])
                 except KeyError:
                     print('No record found for \'num\'')
 
                 try:
-                    self.set_hist_stats(log['hist'])
+                    self._set_hist_stats(log['hist'])
                 except KeyError:
                     print('No record found for \'hist\'')
 
                 try:
-                    self.set_options(log['options'])
+                    self._set_options(log['options'])
                 except KeyError:
                     print('No record found for \'options\'')
 
@@ -200,9 +299,9 @@ class Monitor:
             os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
             self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
 
-        self.q = queue.Queue()
-        self.thread = threading.Thread(target=self._work, daemon=True)
-        self.thread.start()
+        self._q = queue.Queue()
+        self._thread = threading.Thread(target=self._work, daemon=True)
+        self._thread.start()
 
         self.num_iters = num_iters
 
@@ -221,34 +320,159 @@ class Monitor:
 
     @property
     def iter(self):
+        """
+        returns the current iteration.
+
+        :return: :attr:`~_iter`.
+        """
+
         return self._iter
 
     def set_iter(self, iter_num):
+        """
+        sets the iteration counter to a specific value.
+
+        :param iter_num:
+            the iteration number to set.
+        :return: ``None``.
+        """
+
         self._iter = iter_num
 
-    def set_num_stats(self, stats_dict):
+    def _set_num_stats(self, stats_dict):
         self._num_since_beginning.update(stats_dict)
 
-    def set_hist_stats(self, stats_dict):
+    def _set_hist_stats(self, stats_dict):
         self._hist_since_beginning.update(stats_dict)
 
-    def set_options(self, options_dict):
+    def _set_options(self, options_dict):
         self._options.update(options_dict)
 
     def set_option(self, name, option, value):
+        """
+        sets option for histogram plotting.
+
+        :param name:
+             name of the histogram plot.
+             Must be the same as the one specified when using :meth:`~hist`.
+        :param option:
+            there are two options which should be passed as a ``str``.
+
+            ```last_only```: plot the histogram of the last recorded tensor only.
+
+            ```n_bins```: number of bins of the histogram.
+        :param value:
+            value of the chosen option. Should be ``True``/``False`` for ```last_only```
+            and an integer for ```n_bins```.
+        :return: ``None``.
+        """
+
         self._options[name][option] = value
 
-    def clear_num_stats(self, key):
+    def clear_scalar_stats(self, key):
+        """
+        removes the collected statistics for scalar plot of the specified `key`.
+
+        :param key:
+            the name of the scalar collection.
+        :return: ``None``.
+        """
+
         self._num_since_beginning[key].clear()
 
     def clear_hist_stats(self, key):
+        """
+        removes the collected statistics for histogram plot of the specified `key`.
+
+        :param key:
+            the name of the histogram collection.
+        :return: ``None``.
+        """
+
         self._hist_since_beginning[key].clear()
 
     def get_epoch(self):
+        """
+        returns the current epoch.
+        """
         return self._last_epoch
 
     def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
                      train_stats_func=None, val_stats_func=None, *args, **kwargs):
+        """
+        runs the training loop for the given neural network.
+
+        Examples
+        --------
+
+        .. code-block:: python
+
+            import neuralnet_pytorch as nnt
+
+            class MyNet(nnt.Net, nnt.Module):
+                ...
+
+            # define the network, and training and testing loaders
+            net = MyNet(...)
+            train_loader = ...
+            eval_loader = ...
+
+            # instantiate a Monitor object
+            mon = Monitor(model_name='my_net', print_freq=100)
+
+            # save string representations of the model, optimization and lr scheduler
+            mon.dump_model(net)
+            mon.dump_rep('optimizer', net.optim['optimizer'])
+            if net.optim['scheduler']:
+                mon.dump_rep('scheduler', net.optim['scheduler'])
+
+            # collect the parameters of the network
+            states = {
+                'model_state_dict': net.state_dict(),
+                'opt_state_dict': net.optim['optimizer'].state_dict()
+            }
+            if net.optim['scheduler']:
+                states['scheduler_state_dict'] = net.optim['scheduler'].state_dict()
+
+            # save a checkpoint after each epoch and keep only the 5 latest checkpoints
+            mon.schedule(mon.dump, beginning=False, name='training.pt', obj=states, type='torch', keep=5)
+
+            print('Training...')
+
+            # run the training loop
+            mon.run_training(net, train_loader, n_epochs, eval_loader, valid_freq=val_freq)
+            print('Training finished!')
+
+        :param net:
+            must be an instance of :class:`~neuralnet_pytorch.layers.Net`
+            and :class:`~neuralnet_pytorch.layers.Module`.
+        :param train_loader:
+            provides training data for neural net.
+        :param n_epochs:
+            number of training epochs.
+        :param eval_loader:
+            provides validation data for neural net. Optional.
+        :param valid_freq:
+            indicates how often validation is run.
+            In effect if only `eval_loader` is given.
+        :param start_epoch:
+            the epoch from which training will continue.
+            If ``None``, training counter will be set to 0.
+        :param train_stats_func:
+            a custom function to handle statistics returned from the training procedure.
+            If ``None``, a default handler will be used.
+            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param val_stats_func:
+            a custom function to handle statistics returned from the validation procedure.
+            If ``None``, a default handler will be used.
+            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param args:
+            additional arguments that will be passed to neural net.
+        :param kwargs:
+            additional keyword arguments that will be passed to neural net.
+        :return: ``None``.
+        """
+
         assert isinstance(net, nnt.Net), 'net must be an instance of Net'
         assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
             'net must be an instance of Module or Sequential'
@@ -257,8 +481,7 @@ class Monitor:
             'scalars': self.plot,
             'images': self.imwrite,
             'histograms': self.hist,
-            'pointclouds': self.scatter,
-            'predictions': self.confusion_matrix
+            'pointclouds': self.scatter
         }
 
         start_epoch = self._last_epoch if start_epoch is None else start_epoch
@@ -303,8 +526,7 @@ class Monitor:
                             with T.set_grad_enabled(False):
                                 eval_dict = {
                                     'scalars': collections.defaultdict(lambda: []),
-                                    'histograms': collections.defaultdict(lambda: []),
-                                    'predictions': collections.defaultdict(lambda: [])
+                                    'histograms': collections.defaultdict(lambda: [])
                                 }
 
                                 for itt, batch in enumerate(eval_loader):
@@ -318,11 +540,15 @@ class Monitor:
                                                 for ii in range(len(batch_cuda[i])):
                                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                                    net.eval_procedure(*batch_cuda, *args, **kwargs)
+                                    try:
+                                        net.eval_procedure(*batch_cuda, *args, **kwargs)
+                                    except NotImplementedError:
+                                        print('An evaluation procedure must be specified')
+                                        raise
 
                                     if val_stats_func is None:
                                         for t, d in net.stats['eval'].items():
-                                            if t in ('scalars', 'histograms', 'predictions'):
+                                            if t in ('scalars', 'histograms'):
                                                 for k, v in d.items():
                                                     eval_dict[t][k].append(v)
                                             else:
@@ -331,7 +557,7 @@ class Monitor:
                                     else:
                                         val_stats_func(net.stats['eval'])
 
-                                for t in ('scalars', 'histograms', 'predictions'):
+                                for t in ('scalars', 'histograms'):
                                     for k, v in eval_dict[t].items():
                                         v = np.mean(v) if t == 'scalars' else np.concatenate(v)
                                         collect[t](k, v)
@@ -340,19 +566,43 @@ class Monitor:
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
     def _atexit(self):
-        self._flush()
+        self.flush()
         plt.close()
         if self.use_tensorboard:
             self.writer.close()
 
-        self.q.join()
+        self._q.join()
 
     def dump_rep(self, name, obj):
+        """
+        saves a string representation of the given object.
+
+        :param name:
+            name of the txt file containing the string representation.
+        :param obj:
+            object to saved as string representation.
+        :return: ``None``.
+        """
+
         with open(os.path.join(self.current_folder, name + '.txt'), 'w') as outfile:
             outfile.write(str(obj))
             outfile.close()
 
     def dump_model(self, network, *args, **kwargs):
+        """
+        saves a string representation of the given neural net.
+
+        :param network:
+            neural net to be saved as string representation.
+        :param args:
+            additional arguments to Tensorboard's :meth:`SummaryWriter`
+            when :attr:`~use_tensorboard` is ``True``.
+        :param kwargs:
+            additional keyword arguments to Tensorboard's :meth:`SummaryWriter`
+            when :attr:`~use_tensorboard` is ``True``.
+        :return: ``None``.
+        """
+
         assert isinstance(network, (
             nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
             type(network))
@@ -366,16 +616,41 @@ class Monitor:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.print_freq:
             if self._iter % self.print_freq == 0:
-                self._flush()
+                self.flush()
         self.tick()
 
     def copy_file(self, file):
+        """
+        saves a copy of the given file to :attr:`~current_folder`.
+
+        :param file:
+            file to be saved.
+        :return: ``None``.
+        """
+
         copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
 
     def tick(self):
+        """
+        increases the iteration counter by 1.
+        Do not call this if using :class:`Monitor`'s context manager mode.
+
+        :return: ``None``.
+        """
         self._iter += 1
 
     def plot(self, name: str, value):
+        """
+        schedules a plot of scalar value.
+        A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
+
+        :param name:
+            name of the figure to be saved. Must be unique among plots.
+        :param value:
+            scalar value to be plotted.
+        :return: ``None``.
+        """
+
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -384,13 +659,38 @@ class Monitor:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
 
     def scatter(self, name, value):
+        """
+        schedules a scattor plot of (a batch of) points.
+        A 3D :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
+
+        :param name:
+            name of the figure to be saved. Must be unique among plots.
+        :param value:
+            2D or 3D tensor to be plotted. The last dim should be 3.
+        :return: ``None``.
+        """
+
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
         self._pointcloud_since_last_flush[name][self._iter] = value
 
-    @utils.deprecated(imwrite, '0.0.6')
-    def save_image(self, name: str, value):
+    def imwrite(self, name: str, value):
+        """
+        schedules to save images.
+        The images will be rendered and saved every :attr:`~print_freq` iterations.
+
+        :param name:
+            name of the figure to be saved. Must be unique among plots.
+        :param value:
+            3D or 4D tensor to be plotted.
+            The expected shape is (C, H, W) for 3D tensors and
+            (N, C, H, W) for 4D tensors.
+            If the number of channels is other than 3 or 1, each channel is saved as
+            a gray image.
+        :return: ``None``.
+        """
+
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -398,7 +698,27 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_image('image/' + name.replace(' ', '-'), value, self._iter)
 
+    @utils.deprecated(imwrite, '0.0.6')
+    def save_image(self, name: str, value):
+        """
+        schedules to save images.
+        Deprecated in favor of :meth:`~imwrite`.
+        """
+
+        self.imwrite(name, value)
+
     def hist(self, name, value, n_bins=20, last_only=False):
+        """
+        schedules a histogram plot of (a batch of) points.
+        A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
+
+        :param name:
+            name of the figure to be saved. Must be unique among plots.
+        :param value:
+            any-dim tensor to be histogrammed. The last dim should be 3.
+        :return: ``None``.
+        """
+
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -410,14 +730,21 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
 
-    def confusion_matrix(self, name, value):
-        assert isinstance(value, (list, tuple)), 'value must be a tuple of predictions and ground truth labels, with optional class names'
-        assert len(value) == 2 or len(value) == 3, 'value must be a tuple of predictions and ground truth labels, with optional class names'
-
-        value = tuple(utils.to_numpy(v) if isinstance(v, T.Tensor) else v for v in value)
-        self._predictions_since_last_flush[name][self._iter] = value
-
     def schedule(self, func, beginning=True, *args, **kwargs):
+        """
+        uses to schedule a routine during every epoch in :meth:`~run_training`.
+
+        :param func:
+            a routine to be executed in :meth:`~run_training`.
+        :param beginning:
+            whether to run at the beginning of every epoch. Default: ``True``.
+        :param args:
+            additional arguments to `func`.
+        :param kwargs:
+            additional keyword arguments to `func`.
+        :return: ``None``
+        """
+
         assert callable(func), 'func must be callable'
         name = func.__name__
         when = 'beginning' if beginning else 'end'
@@ -426,7 +753,7 @@ class Monitor:
         self._schedule[when][name]['kwargs'] = kwargs
 
     def _worker(self, it, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
-                _pointcloud_since_last_flush, _predictions_since_last_flush):
+                _pointcloud_since_last_flush):
         prints = []
 
         # plot statistics
@@ -533,64 +860,10 @@ class Monitor:
                     fig.clear()
         plt.close('all')
 
-        # plot confusion matrix
-        # code adapted from https://scikit-learn.org/stable/auto_examples/model_selection/plot_confusion_matrix.html#sphx-glr-auto-examples-model-selection-plot-confusion-matrix-py
-        for name, vals in list(_predictions_since_last_flush.items()):
-            idx = max(vals.keys())
-
-            if len(vals[idx]) == 2:
-                y_pred, y_true = vals[idx]
-                y_pred, y_true = np.array(y_pred), np.array(y_true)
-                classes = np.arange(y_pred.shape[0])
-            else:
-                y_pred, y_true, classes = vals[idx]
-                y_pred, y_true, classes = np.array(y_pred), np.array(y_true), np.array(classes)
-
-            for normalize in (True, False):
-                if normalize:
-                    title = 'Normalized confusion matrix'
-                else:
-                    title = 'Confusion matrix, without normalization'
-
-                # Compute confusion matrix
-                cfm = confusion_matrix(y_true, y_pred)
-                # Only use the labels that appear in the data
-                classes = classes[unique_labels(y_true, y_pred)]
-                if normalize:
-                    cfm = cfm.astype('float') / cfm.sum(axis=1)[:, np.newaxis]
-
-                fig, ax = plt.subplots()
-                im = ax.imshow(cfm, interpolation='nearest', cmap=plt.cm.Blues)
-                ax.figure.colorbar(im, ax=ax)
-                # We want to show all ticks...
-                ax.set(xticks=np.arange(cfm.shape[1]),
-                       yticks=np.arange(cfm.shape[0]),
-                       # ... and label them with the respective list entries
-                       xticklabels=classes, yticklabels=classes,
-                       title=title,
-                       ylabel='True label',
-                       xlabel='Predicted label')
-
-                # Rotate the tick labels and set their alignment.
-                plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-                         rotation_mode="anchor")
-
-                # Loop over data dimensions and create text annotations.
-                fmt = '.2f' if normalize else 'd'
-                thresh = cfm.max() / 2.
-                for i in range(cfm.shape[0]):
-                    for j in range(cfm.shape[1]):
-                        ax.text(j, i, format(cfm[i, j], fmt),
-                                ha="center", va="center",
-                                color="white" if cfm[i, j] > thresh else "black")
-                fig.tight_layout()
-                plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '%d.jpg' % normalize))
-
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({'iter': it, 'epoch': self._last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
-                      'pred': dict(self._predictions_since_last_flush),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
@@ -608,20 +881,25 @@ class Monitor:
 
     def _work(self):
         while True:
-            items = self.q.get()
+            items = self._q.get()
             work = items[0]
             work(*items[1:])
-            self.q.task_done()
+            self._q.task_done()
 
-    def _flush(self):
-        self.q.put((self._worker, self._iter, dict(self._num_since_last_flush), dict(self._img_since_last_flush),
-                    dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush),
-                    dict(self._predictions_since_last_flush)))
+    def flush(self):
+        """
+        executes all the scheduled plots.
+        Do not call this if using :class:`Monitor`'s context manager mode.
+
+        :return: ``None``.
+        """
+
+        self._q.put((self._worker, self._iter, dict(self._num_since_last_flush), dict(self._img_since_last_flush),
+                     dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush)))
         self._num_since_last_flush.clear()
         self._img_since_last_flush.clear()
         self._hist_since_last_flush.clear()
         self._pointcloud_since_last_flush.clear()
-        self._predictions_since_last_flush.clear()
 
     def _version(self, file, keep):
         name, ext = os.path.splitext(file)
@@ -647,9 +925,57 @@ class Monitor:
         return versioned_filename
 
     def dump(self, name, obj, type='pickle', keep=-1, **kwargs):
+        """
+        saves the given object.
+
+        :param name:
+            name of the file to be saved.
+        :param obj:
+            object to be saved.
+        :param type:
+            there are 3 types of data format.
+
+            ```pickle```: use :func:`pickle.dump` to store object.
+
+            ```torch```: use :func:`torch.save` to store object.
+
+            ```txt```: use :func:`numpy.savetxt` to store object.
+
+            Default: ```pickle```.
+        :param keep:
+            the number of versions of the saved file to keep.
+            Default: -1 (keeps only the latest version).
+        :param kwargs:
+            additional keyword arguments to the underlying save function.
+        :return: ``None``.
+        """
+
         self._dump(name.replace(' ', '_'), obj, keep, self._io_method[type + '_save'], **kwargs)
 
     def load(self, file, type='pickle', version=-1, **kwargs):
+        """
+        loads from the given file.
+
+        :param file:
+            name of the saved file without version.
+        :param type:
+            there are 3 types of data format.
+
+            ```pickle```: use :func:`pickle.load` to store object.
+
+            ```torch```: use :func:`torch.load` to store object.
+
+            ```txt```: use :func:`numpy.loadtxt` to store object.
+
+            Default: ```pickle```.
+        :param version:
+            the version of the saved file to load.
+            Default: -1 (loads the latest version of the saved file).
+        :param kwargs:
+            additional keyword arguments to the underlying load function.
+        :return: ``None``.
+        """
+
         return self._load(file, self._io_method[type + '_load'], version, **kwargs)
 
     def _dump(self, name, obj, keep, method, **kwargs):
@@ -732,22 +1058,38 @@ class Monitor:
         return T.load(name, **kwargs)
 
     def reset(self):
+        """
+        factory-resets the monitor object.
+        This includes clearing all the collected data,
+        set the iteration and epoch counters to 0,
+        and reset the timer.
+
+        :return: ``None``.
+        """
+
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._predictions_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
         self._iter = 0
+        self._last_epoch = 0
         self._timer = time.time()
 
     def read_log(self, log):
+        """
+        reads a saved log file.
+
+        :param log:
+            name of the log file.
+        :return:
+            contents of the log file.
+        """
+
         with open(os.path.join(self.current_folder, log), 'rb') as f:
             contents = pkl.load(f)
             f.close()
         return contents
-
-    imwrite = save_image
