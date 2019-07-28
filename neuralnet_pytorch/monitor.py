@@ -619,16 +619,21 @@ class Monitor:
                 self.flush()
         self.tick()
 
-    def copy_file(self, file):
+    def copy_files(self, files):
         """
-        saves a copy of the given file to :attr:`~current_folder`.
+        saves a copy of the given files to :attr:`~current_folder`.
+        Accepts a str or list/tuple of file names.
 
-        :param file:
+        :param files:
             file to be saved.
         :return: ``None``.
         """
-
-        copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
+        files = (files,) if isinstance(str, files) else files
+        for file in files:
+            try:
+                copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
+            except FileNotFoundError:
+                print('No such file or directory: %s' % file)
 
     def tick(self):
         """
@@ -865,6 +870,7 @@ class Monitor:
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
+            f.close()
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
                                                                 (it % self.num_iters) / self.num_iters * 100.,
@@ -1090,6 +1096,11 @@ class Monitor:
         """
 
         with open(os.path.join(self.current_folder, log), 'rb') as f:
-            contents = pkl.load(f)
+            f.seek(0)
+            try:
+                contents = pkl.load(f)
+            except EOFError:
+                contents = {}
+
             f.close()
         return contents

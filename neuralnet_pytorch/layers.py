@@ -44,9 +44,9 @@ class Net:
         a dictionary that contains the optimizer and scheduler for optimization.
     stats
         a dictionary to hold the interested statistics from training and evaluation.
-        For each ```train``` and ```eval``` keys, an other dictionary with 5 keys
-        are defined.
-        The 5 keys are: ```scalars```, ```images```, ```histograms```,
+        For each ```train``` and ```eval``` keys, an other dictionary with several
+        built-in keys.
+        The possible keys are: ```scalars```, ```images```, ```histograms```,
         and  ```pointclouds```.
     """
 

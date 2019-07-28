@@ -4,6 +4,7 @@
 [![PyPI - Wheel](https://img.shields.io/pypi/wheel/neuralnet-pytorch.svg)](https://pypi.org/project/neuralnet-pytorch/)
 [![Github - Tag](https://img.shields.io/github/tag/justanhduc/neuralnet-pytorch.svg)](https://github.com/justanhduc/neuralnet-pytorch/releases/tag/rel-0.0.4)
 [![License](https://img.shields.io/github/license/justanhduc/neuralnet-pytorch.svg)](https://github.com/justanhduc/neuralnet-pytorch/blob/master/LICENSE.txt)
+[![Build Status](https://travis-ci.org/justanhduc/neuralnet-pytorch.svg?branch=master)](https://travis-ci.org/justanhduc/neuralnet-pytorch)
 
 __A high level framework for general purpose neural networks in Pytorch.__
 

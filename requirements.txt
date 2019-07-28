@@ -1,6 +1,9 @@
+numpy
 visdom
-matplotlib
+matplotlib <= 3.1.0
 slackclient
 tb-nightly
 imageio
 gin-config
+future
+tensorboardX
