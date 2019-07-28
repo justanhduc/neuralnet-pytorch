@@ -104,31 +104,11 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
     assert reduce in ('mean', 'sum'), 'Unknown reduce method'
     reduce = T.sum if reduce == 'sum' else T.mean
 
-    def batch_pairwise_dist(x, y):
-        bs, num_points_x, points_dim = x.size()
-        _, num_points_y, _ = y.size()
-        xx = T.bmm(x, x.transpose(2, 1))
-        yy = T.bmm(y, y.transpose(2, 1))
-        zz = T.bmm(x, y.transpose(2, 1))
-
-        if utils.cuda_available:
-            dtype = T.cuda.LongTensor
-        else:
-            dtype = T.LongTensor
-
-        diag_ind_x = T.arange(0, num_points_x).type(dtype)
-        diag_ind_y = T.arange(0, num_points_y).type(dtype)
-        # brk()
-        rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
-        ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
-        P = (rx.transpose(2, 1) + ry - 2 * zz)
-        return P
-
     if c_code:
         from .extensions import chamfer_distance
         dist1, dist2 = chamfer_distance(xyz1, xyz2)
     else:
-        P = batch_pairwise_dist(xyz1, xyz2)
+        P = utils.batch_pairwise_dist(xyz1, xyz2)
         dist2, _ = T.min(P, 1)
         dist1, _ = T.min(P, 2)
     loss_2 = reduce(dist2)

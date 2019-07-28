@@ -1,0 +1,5 @@
+net.dtype = %float32
+net.activation = @tanh
+net.loss = @l1loss
+net.optimizer = @adamax
+net.scheduler = @exp_lr

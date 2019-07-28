@@ -1,0 +1,52 @@
+cache:
+  directories:
+    - $HOME/.cache/pip
+    - $HOME/download # Sufficient to add miniconda.sh to TRAVIS cache.
+    - $HOME/miniconda2 # Add the installation to TRAVIS cache.
+
+dist: xenial
+
+language: python
+
+python:
+  - "3.4"
+  - "3.5"
+  - "3.6"
+  - "3.7"
+
+before_install:
+  - ./.travis/travis_before_install.sh
+  - export PATH=/home/travis/miniconda2/bin:$PATH
+
+install:
+  - ./.travis/travis_install.sh
+  - source activate pyenv
+  - conda install -y pytorch-cpu torchvision-cpu -c pytorch
+  - pip install pytest
+  - pip install -r requirements.txt
+  - pip install .
+
+jobs:
+  - &normaltest
+    stage: test
+    python: "3.4"
+  - <<: *normaltest
+    python: "3.5"
+  - <<: *normaltest
+    python: "3.6"
+  - <<: *normaltest
+    python: "3.7"
+
+script:
+  - python --version
+  - uname -a
+  - free -m
+  - df -h
+  - ulimit -a
+  - echo "$PART"
+  - python -c 'import torch; print(torch.__version__)'
+  - python -c 'import neuralnet_pytorch; print(neuralnet_pytorch.__version__)'
+  - python -m pytest -sv neuralnet_pytorch/tests/
+
+after_failure:
+- cat /home/travis/.pip/pip.log

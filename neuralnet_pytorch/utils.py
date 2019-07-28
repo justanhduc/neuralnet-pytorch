@@ -8,9 +8,8 @@ from torch.utils.data.dataloader import default_collate
 
 from queue import Queue
 from scipy.stats import truncnorm
-from PIL import Image
 from torch._six import container_abcs
-from itertools import repeat
+from itertools import repeat as repeat_
 from functools import wraps, partial, update_wrapper
 
 try:
@@ -33,7 +32,7 @@ def _make_input_shape(m, n):
     def parse(x):
         if isinstance(x, container_abcs.Iterable):
             return x
-        return tuple(repeat(None, m)) + (x, ) + tuple(repeat(None, n))
+        return tuple(repeat_(None, m)) + (x, ) + tuple(repeat_(None, n))
     return parse
 
 
@@ -546,6 +545,21 @@ def ravel_index(index, shape):
         shape = shape.cuda()
 
     return sum([T.tensor(index[i], dtype=shape.dtype) * T.prod(shape[i + 1:]) for i in range(len(shape))])
+
+
+def repeat(x, dims):
+    """
+    Repeats `x` along `dims`.
+
+    :param x:
+        a :mod:`torch.Tensor`.
+    :param dims:
+        the number of times to repeat this tensor along each dimension.
+    :return:
+        a new :mod:`torch.Tensor` whose elements are repeated elements in `x`.
+    """
+
+    return x.repeat(*dims)
 
 
 def smooth(x, beta=.9, window='hanning'):
