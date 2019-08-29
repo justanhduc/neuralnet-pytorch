@@ -318,6 +318,15 @@ class Monitor:
         atexit.register(self._atexit)
         print('Result folder: %s' % self.current_folder)
 
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.print_freq:
+            if self._iter % self.print_freq == 0:
+                self.flush()
+        self.tick()
+
     @property
     def iter(self):
         """
@@ -517,10 +526,10 @@ class Monitor:
 
                                 collect[t](k, v)
                     else:
-                        train_stats_func(net.stats['train'])
+                        train_stats_func(net.stats['train'], it)
 
                     if valid_freq:
-                        if it % valid_freq == 0:
+                        if self._iter % valid_freq == 0:
                             net.eval()
 
                             with T.set_grad_enabled(False):
@@ -553,9 +562,9 @@ class Monitor:
                                                     eval_dict[t][k].append(v)
                                             else:
                                                 for k, v in d.items():
-                                                    collect[t](k, v)
+                                                    collect[t](k + '_%d' % itt, v)
                                     else:
-                                        val_stats_func(net.stats['eval'])
+                                        val_stats_func(net.stats['eval'], itt)
 
                                 for t in ('scalars', 'histograms'):
                                     for k, v in eval_dict[t].items():
@@ -610,15 +619,6 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_graph(network, *args, **kwargs)
 
-    def __enter__(self):
-        pass
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.print_freq:
-            if self._iter % self.print_freq == 0:
-                self.flush()
-        self.tick()
-
     def copy_files(self, files):
         """
         saves a copy of the given files to :attr:`~current_folder`.
@@ -628,7 +628,8 @@ class Monitor:
             file to be saved.
         :return: ``None``.
         """
-        files = (files,) if isinstance(str, files) else files
+
+        files = (files,) if isinstance(files, str) else files
         for file in files:
             try:
                 copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
@@ -663,7 +664,7 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
 
-    def scatter(self, name, value):
+    def scatter(self, name: str, value, latest=False):
         """
         schedules a scattor plot of (a batch of) points.
         A 3D :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -672,15 +673,20 @@ class Monitor:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             2D or 3D tensor to be plotted. The last dim should be 3.
+        :param latest:
+            whether to save only the latest statistics or keep everything from beginning.
         :return: ``None``.
         """
+
+        if self._iter == 0:
+            self._options[name]['last_only'] = latest
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
         self._pointcloud_since_last_flush[name][self._iter] = value
 
-    def imwrite(self, name: str, value):
+    def imwrite(self, name: str, value, latest=False):
         """
         schedules to save images.
         The images will be rendered and saved every :attr:`~print_freq` iterations.
@@ -693,8 +699,13 @@ class Monitor:
             (N, C, H, W) for 4D tensors.
             If the number of channels is other than 3 or 1, each channel is saved as
             a gray image.
+        :param latest:
+            whether to save only the latest statistics or keep everything from beginning.
         :return: ``None``.
         """
+
+        if self._iter == 0:
+            self._options[name]['last_only'] = latest
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
@@ -712,7 +723,7 @@ class Monitor:
 
         self.imwrite(name, value)
 
-    def hist(self, name, value, n_bins=20, last_only=False):
+    def hist(self, name, value, n_bins=20, latest=False):
         """
         schedules a histogram plot of (a batch of) points.
         A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -721,6 +732,10 @@ class Monitor:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             any-dim tensor to be histogrammed. The last dim should be 3.
+        :param n_bins:
+            number of bins of the histogram.
+        :param latest:
+            whether to save only the latest statistics or keep everything from beginning.
         :return: ``None``.
         """
 
@@ -728,7 +743,7 @@ class Monitor:
             value = utils.to_numpy(value)
 
         if self._iter == 0:
-            self._options[name]['last_only'] = last_only
+            self._options[name]['last_only'] = latest
             self._options[name]['n_bins'] = n_bins
 
         self._hist_since_last_flush[name][self._iter] = value
@@ -764,8 +779,8 @@ class Monitor:
         # plot statistics
         fig = plt.figure()
         plt.xlabel('iteration')
-        for name, vals in list(_num_since_last_flush.items()):
-            self._num_since_beginning[name].update(vals)
+        for name, val in list(_num_since_last_flush.items()):
+            self._num_since_beginning[name].update(val)
 
             x_vals = list(self._num_since_beginning[name].keys())
             plt.ylabel(name)
@@ -776,8 +791,7 @@ class Monitor:
                 plot = plt.plot(x_vals, y_vals)
                 plt.legend(plot, keys)
                 prints.append(
-                    "{}\t{:.5f}".format(name,
-                                        np.mean(np.array([[val[k] for k in keys] for val in vals.values()]), 0)))
+                    "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in val.values()]), 0)))
             else:
                 max_, min_, med_, mean_ = np.max(y_vals), np.min(y_vals), np.median(y_vals), np.mean(y_vals)
                 argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
@@ -785,7 +799,7 @@ class Monitor:
                           '\nmean: {:.8f}'.format(max_, x_vals[argmax_], min_, x_vals[argmin_], med_, mean_))
 
                 plt.plot(x_vals, y_vals)
-                prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(vals.values())), 0)))
+                prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
 
             fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
             if self.use_visdom:
@@ -793,51 +807,73 @@ class Monitor:
             fig.clear()
 
         # save recorded images
-        for name, vals in list(_img_since_last_flush.items()):
-            for val in vals.values():
+        for name, val in list(_img_since_last_flush.items()):
+            latest = self._options[name].get('last_only')
+
+            for itt, val in val.items():
                 if val.dtype != 'uint8':
                     val = (255.99 * val).astype('uint8')
+
                 if len(val.shape) == 4:
                     if self.use_visdom:
                         self.vis.images(val, win=name)
+
                     for num in range(val.shape[0]):
                         img = val[num]
                         if img.shape[0] == 3:
                             img = np.transpose(img, (1, 2, 0))
-                            imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % num),
-                                    img)
+
+                            if latest:
+                                imwrite(os.path.join(self.current_folder,
+                                                     name.replace(' ', '_') + '_%d.jpg' % num), img)
+                            else:
+                                imwrite(os.path.join(self.current_folder,
+                                                     name.replace(' ', '_') + '_%d_%d.jpg' % (itt, num)), img)
+
                         else:
                             for ch in range(img.shape[0]):
                                 img_normed = (img[ch] - np.min(img[ch])) / (np.max(img[ch]) - np.min(img[ch]))
-                                imwrite(os.path.join(self.current_folder,
-                                                     name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
+
+                                if latest:
+                                    imwrite(os.path.join(self.current_folder,
+                                                         name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
+                                else:
+                                    imwrite(os.path.join(self.current_folder,
+                                                         name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)),
+                                            img_normed)
+
                 elif len(val.shape) == 3 or len(val.shape) == 2:
                     if self.use_visdom:
                         self.vis.image(val if len(val.shape) == 2 else np.transpose(val, (2, 0, 1)), win=name)
-                    imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'), val)
+
+                    if latest:
+                        imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'), val)
+                    else:
+                        imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
+
                 else:
                     raise NotImplementedError
 
         # make histograms of recorded data
-        for name, vals in list(_hist_since_last_flush.items()):
+        for name, val in list(_hist_since_last_flush.items()):
             if self.use_tensorboard:
                 k = max(list(_hist_since_last_flush[name].keys()))
-                val = np.array(vals[k]).flatten()
+                val = np.array(val[k]).flatten()
                 self.writer.add_histogram(name, val, global_step=k)
 
             n_bins = self._options[name].get('n_bins')
-            last_only = self._options[name].get('last_only')
+            latest = self._options[name].get('last_only')
 
-            if last_only:
+            if latest:
                 k = max(list(_hist_since_last_flush[name].keys()))
-                val = np.array(vals[k]).flatten()
+                val = np.array(val[k]).flatten()
                 plt.hist(val, bins='auto')
             else:
-                self._hist_since_beginning[name].update(vals)
+                self._hist_since_beginning[name].update(val)
 
                 z_vals = list(self._hist_since_beginning[name].keys())
-                vals = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
-                hists = [np.histogram(val, bins=n_bins) for val in vals]
+                val = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
+                hists = [np.histogram(val, bins=n_bins) for val in val]
                 y_vals = np.array([hists[i][0] for i in range(len(hists))])
                 x_vals = np.array([hists[i][1] for i in range(len(hists))])
                 x_vals = (x_vals[:, :-1] + x_vals[:, 1:]) / 2.
@@ -852,17 +888,35 @@ class Monitor:
 
         # scatter pointcloud(s)
         for name, vals in list(_pointcloud_since_last_flush.items()):
-            vals = list(vals.values())[-1]
-            if len(vals.shape) == 2:
-                ax = fig.add_subplot(111, projection='3d')
-                ax.scatter(*[vals[:, i] for i in range(vals.shape[-1])])
-                plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
-            elif len(vals.shape) == 3:
-                for ii in range(vals.shape[0]):
+            latest = self._options[name].get('last_only')
+            for itt, val in vals.items():
+                if len(val.shape) == 2:
                     ax = fig.add_subplot(111, projection='3d')
-                    ax.scatter(*[vals[ii, :, i] for i in range(vals.shape[-1])])
-                    plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
-                    fig.clear()
+                    ax.scatter(*[val[:, i] for i in range(val.shape[-1])])
+
+                    if latest:
+                        plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
+                    else:
+                        plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
+
+                elif len(val.shape) == 3:
+                    for ii in range(val.shape[0]):
+                        ax = fig.add_subplot(111, projection='3d')
+                        ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
+                        if latest:
+                            plt.savefig(
+                                os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
+                        else:
+                            plt.savefig(os.path.join(self.current_folder,
+                                                     name.replace(' ', '_') + '_%d_%d.jpg' % (itt, ii + 1)))
+
+                        fig.clear()
+                else:
+                    raise NotImplementedError(
+                        'Point cloud tensor must have 2 or 3 dimensions, got %d.' % len(val.shape))
+
+                fig.clear()
+            fig.clear()
         plt.close('all')
 
         with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
