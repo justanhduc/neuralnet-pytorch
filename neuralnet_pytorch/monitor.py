@@ -930,8 +930,11 @@ class Monitor:
                                                                 (it % self.num_iters) / self.num_iters * 100.,
                                                                 it // self.num_iters + 1) if self.num_iters \
             else 'Iteration {}'.format(it)
-        log = 'Elapsed time {:.2f}min\t{}\t{}'.format((time.time() - self._timer) / 60., iter_show,
-                                                      '\t'.join(prints))
+
+        elapsed_time = time.time() - self._timer
+        time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
+        elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600. else elapsed_time / 3600.) + time_unit
+        log = 'Elapsed time {}\t{}\t{}'.format(elapsed_time, iter_show, '\t'.join(prints))
         print(log)
 
         if self.send_slack:
