@@ -564,7 +564,7 @@ def repeat(x, dims):
 
 def smooth(x, beta=.9, window='hanning'):
     """
-    Smooths the data using a window with requested size.
+    Smoothens the data using a window with requested size.
     This method is based on the convolution of a scaled window with the signal.
     The signal is prepared by introducing reflected copies of the signal
     (with the window size) in both ends so that transient parts are minimized
@@ -619,12 +619,73 @@ def smooth(x, beta=.9, window='hanning'):
     return y if y.shape[0] == x.shape[0] else y[(window_len // 2 - 1):-(window_len // 2)]
 
 
+def batch_pairwise_dist(x, y):
+    """
+    Calculates the pair-wise distance between two sets of points.
+
+    :param x:
+        a tensor of shape (m, nx, d).
+    :param y:
+        a tensor of shape (m, ny, d).
+
+    :return:
+        the exhaustive distance tensor between every pair of points in `x` and `y`.
+    """
+    bs, num_points_x, points_dim = x.size()
+    _, num_points_y, _ = y.size()
+    xx = T.bmm(x, x.transpose(2, 1))
+    yy = T.bmm(y, y.transpose(2, 1))
+    zz = T.bmm(x, y.transpose(2, 1))
+
+    if cuda_available:
+        dtype = T.cuda.LongTensor
+    else:
+        dtype = T.LongTensor
+
+    diag_ind_x = T.arange(0, num_points_x).type(dtype)
+    diag_ind_y = T.arange(0, num_points_y).type(dtype)
+
+    rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
+    ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
+    P = (rx.transpose(2, 1) + ry - 2 * zz)
+    return P
+
+
+def time_cuda_module(f, *args, **kwargs):
+    """
+    Measures the time taken by a Pytorchh module.
+
+    :param f:
+        a Pytorch module.
+    :param args:
+        arguments to be passed to `f`.
+    :param kwargs:
+        keyword arguments to be passed to `f`.
+
+    :return:
+        the time (in second) that `f` takes.
+    """
+    start = T.cuda.Event(enable_timing=True)
+    end = T.cuda.Event(enable_timing=True)
+
+    start.record()
+    f(*args, **kwargs)
+    end.record()
+
+    # Waits for everything to finish running
+    T.cuda.synchronize()
+
+    total = start.elapsed_time(end)
+    print('Took %fs' % total)
+    return total
+
+
 def slack_message(username, message, channel, token, **kwargs):
     """
     Sends a slack message to the specified chatroom.
 
     :param username:
-        Slack username
+        Slack username.
     :param message:
         message to be sent.
     :param channel:
