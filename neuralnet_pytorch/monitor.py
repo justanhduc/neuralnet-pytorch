@@ -406,7 +406,7 @@ class Monitor:
         """
         return self._last_epoch
 
-    def run_training(self, net, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
+    def run_training(self, net, optim, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
                      train_stats_func=None, val_stats_func=None, *args, **kwargs):
         """
         runs the training loop for the given neural network.
@@ -431,17 +431,17 @@ class Monitor:
 
             # save string representations of the model, optimization and lr scheduler
             mon.dump_model(net)
-            mon.dump_rep('optimizer', net.optim['optimizer'])
-            if net.optim['scheduler']:
-                mon.dump_rep('scheduler', net.optim['scheduler'])
+            mon.dump_rep('optimizer', optim['optimizer'])
+            if optim['scheduler']:
+                mon.dump_rep('scheduler', optim['scheduler'])
 
             # collect the parameters of the network
             states = {
                 'model_state_dict': net.state_dict(),
-                'opt_state_dict': net.optim['optimizer'].state_dict()
+                'opt_state_dict': optim['optimizer'].state_dict()
             }
-            if net.optim['scheduler']:
-                states['scheduler_state_dict'] = net.optim['scheduler'].state_dict()
+            if optim['scheduler']:
+                states['scheduler_state_dict'] = optim['scheduler'].state_dict()
 
             # save a checkpoint after each epoch and keep only the 5 latest checkpoints
             mon.schedule(mon.dump, beginning=False, name='training.pt', obj=states, type='torch', keep=5)
@@ -496,8 +496,8 @@ class Monitor:
         start_epoch = self._last_epoch if start_epoch is None else start_epoch
         for epoch in range(start_epoch, n_epochs):
             self._last_epoch = epoch
-            if net.optim['scheduler'] is not None:
-                net.optim['scheduler'].step(epoch)
+            if optim['scheduler'] is not None:
+                optim['scheduler'].step(epoch)
 
             for func_dict in self._schedule['beginning'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
@@ -515,7 +515,7 @@ class Monitor:
                                 for ii in range(len(batch_cuda[i])):
                                     batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
 
-                    net.learn(*batch_cuda, *args, **kwargs)
+                    net.learn(optim, *batch_cuda, *args, **kwargs)
 
                     if train_stats_func is None:
                         for t, d in net.stats['train'].items():

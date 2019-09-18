@@ -53,11 +53,6 @@ class Net:
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        self.optim = {
-            'optimizer': None,
-            'scheduler': None
-        }
-
         self.stats = {'train': {
                 'scalars': {},
                 'images': {},
@@ -81,7 +76,7 @@ class Net:
 
         raise NotImplementedError
 
-    def learn(self, *args, **kwargs):
+    def learn(self, optim, *args, **kwargs):
         """
         The optimization can be defined here.
         Usually, it includes zeroing gradients, optimizing the loss,
