@@ -429,6 +429,12 @@ def bulk_to_cuda(xs):
     return tuple([to_cuda(x) for x in xs])
 
 
+def batch_to_cuda(batch):
+    batch_cuda = [b.cuda() if not isinstance(b, (list, tuple))
+                  else [bb.cuda() for bb in b] for b in batch]
+    return batch_cuda
+
+
 def dimshuffle(x, pattern):
     """
     Reorders the dimensions of this variable, optionally inserting broadcasted dimensions.
@@ -653,7 +659,7 @@ def batch_pairwise_dist(x, y):
 
 def time_cuda_module(f, *args, **kwargs):
     """
-    Measures the time taken by a Pytorchh module.
+    Measures the time taken by a Pytorch module.
 
     :param f:
         a Pytorch module.
@@ -676,7 +682,7 @@ def time_cuda_module(f, *args, **kwargs):
     T.cuda.synchronize()
 
     total = start.elapsed_time(end)
-    print('Took %fs' % total)
+    print('Took %fms' % total)
     return total
 
 

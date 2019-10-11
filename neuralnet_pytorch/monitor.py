@@ -444,7 +444,7 @@ class Monitor:
                 states['scheduler_state_dict'] = optim['scheduler'].state_dict()
 
             # save a checkpoint after each epoch and keep only the 5 latest checkpoints
-            mon.schedule(mon.dump, beginning=False, name='training.pt', obj=states, type='torch', keep=5)
+            mon.schedule(mon.dump, optim, beginning=False, name='training.pt', obj=states, type='torch', keep=5)
 
             print('Training...')
 
@@ -470,7 +470,7 @@ class Monitor:
         :param train_stats_func:
             a custom function to handle statistics returned from the training procedure.
             If ``None``, a default handler will be used.
-            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+            For a list of supported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
         :param val_stats_func:
             a custom function to handle statistics returned from the validation procedure.
             If ``None``, a default handler will be used.
@@ -505,16 +505,7 @@ class Monitor:
             for it, batch in enumerate(train_loader):
                 net.train(True)
                 with self:
-                    batch_cuda = list(batch)
-                    if nnt.cuda_available:
-                        for i in range(len(batch_cuda)):
-                            if not isinstance(batch_cuda[i], (list, tuple)):
-                                batch_cuda[i] = batch_cuda[i].cuda()
-                            else:
-                                batch_cuda[i] = list(batch_cuda[i])
-                                for ii in range(len(batch_cuda[i])):
-                                    batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
-
+                    batch_cuda = utils.batch_to_cuda(batch)
                     net.learn(optim, *batch_cuda, *args, **kwargs)
 
                     if train_stats_func is None:
@@ -539,16 +530,7 @@ class Monitor:
                                 }
 
                                 for itt, batch in enumerate(eval_loader):
-                                    batch_cuda = list(batch)
-                                    if nnt.cuda_available:
-                                        for i in range(len(batch_cuda)):
-                                            if not isinstance(batch_cuda[i], (list, tuple)):
-                                                batch_cuda[i] = batch_cuda[i].cuda()
-                                            else:
-                                                batch_cuda[i] = list(batch_cuda[i])
-                                                for ii in range(len(batch_cuda[i])):
-                                                    batch_cuda[i][ii] = batch_cuda[i][ii].cuda()
-
+                                    batch_cuda = utils.batch_to_cuda(batch)
                                     try:
                                         net.eval_procedure(*batch_cuda, *args, **kwargs)
                                     except NotImplementedError:
