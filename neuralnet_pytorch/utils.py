@@ -553,7 +553,7 @@ def ravel_index(index, shape):
     return sum([T.tensor(index[i], dtype=shape.dtype) * T.prod(shape[i + 1:]) for i in range(len(shape))])
 
 
-def repeat(x, dims):
+def tile(x, dims):
     """
     Repeats `x` along `dims`.
 
@@ -566,6 +566,74 @@ def repeat(x, dims):
     """
 
     return x.repeat(*dims)
+
+
+def repeat(input, repeats, dim=None):
+    """
+    Repeat elements of a tensor like `numpy.repeat`.
+    :param input:
+    :param repeats:
+    :param dim:
+    :return:
+    """
+
+    return T.repeat_interleave(input, repeats, dim)
+
+
+def block_diag(*blocks):
+    """
+    Modified from scipy.linalg.block_diag.
+    Create a block diagonal matrix from provided arrays.
+    Given the inputs `A`, `B` and `C`, the output will have these
+    arrays arranged on the diagonal::
+        [[A, 0, 0],
+         [0, B, 0],
+         [0, 0, C]]
+    Parameters
+    ----------
+    A, B, C, ... : array_like, up to 2-D
+        Input arrays.  A 1-D array or array_like sequence of length `n`is
+        treated as a 2-D array with shape ``(1,n)``.
+    Returns
+    -------
+    D : ndarray
+        Array with `A`, `B`, `C`, ... on the diagonal.  `D` has the
+        same dtype as `A`.
+    Notes
+    -----
+    If all the input arrays are square, the output is known as a
+    block diagonal matrix.
+    Examples
+    --------
+    >>> from neuralnet_pytorch.utils import block_diag
+    >>> A = T.tensor([[1, 0],
+    ...               [0, 1]])
+    >>> B = T.tensor([[3, 4, 5],
+    ...               [6, 7, 8]])
+    >>> C = T.tensor([[7]])
+    >>> block_diag(A, B, C)
+    [[1 0 0 0 0 0]
+     [0 1 0 0 0 0]
+     [0 0 3 4 5 0]
+     [0 0 6 7 8 0]
+     [0 0 0 0 0 7]]
+    >>> block_diag(T.tensor([1.0]), T.tensor([2, 3]), T.tensor([[4, 5], [6, 7]]))
+    array([[ 1.,  0.,  0.,  0.,  0.],
+           [ 0.,  2.,  3.,  0.,  0.],
+           [ 0.,  0.,  0.,  4.,  5.],
+           [ 0.,  0.,  0.,  6.,  7.]])
+    """
+    assert all(a.ndim >= 2 for a in blocks), 'All tensors must be at least of rank 2'
+
+    shapes = np.array([a.shape for a in blocks])
+    out = T.zeros(*list(np.sum(shapes, axis=0)), dtype=blocks[0].dtype)
+
+    r, c = 0, 0
+    for i, (rr, cc) in enumerate(shapes):
+        out[r:r + rr, c:c + cc] = blocks[i]
+        r = r + rr
+        c = c + cc
+    return out
 
 
 def smooth(x, beta=.9, window='hanning'):
