@@ -54,7 +54,7 @@ def setup_package():
                 'neuralnet_pytorch/extensions/chamfer.cu',
             ]),
         ],
-        dependency_links=['https://github.com/szagoruyko/pyinn'],
+        dependency_links=['https://github.com/szagoruyko/pyinn/tarball/master#egg=pyinn'],
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
         project_urls={
