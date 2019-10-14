@@ -5,7 +5,7 @@ import abc
 import threading
 import warnings
 from torch.utils.data.dataloader import default_collate
-
+import numbers
 from queue import Queue
 from scipy.stats import truncnorm
 from torch._six import container_abcs
@@ -47,8 +47,13 @@ def validate(func):
     """
 
     def wrapper(self):
-        if func(self) is None:
+        shape = func(self)
+
+        if shape is None:
             return None
+
+        if isinstance(shape, numbers.Number):
+            return int(shape)
 
         out = [None if x is None or np.isnan(x) else int(x) for x in func(self)]
         return tuple(out)
@@ -691,6 +696,118 @@ def smooth(x, beta=.9, window='hanning'):
 
     y = np.convolve(w / w.sum(), s, mode='valid')
     return y if y.shape[0] == x.shape[0] else y[(window_len // 2 - 1):-(window_len // 2)]
+
+
+def get_bilinear_weights(x, y, h, w, border_mode='nearest'):
+    """
+    Returns bilinear weights used in bilinear interpolation.
+
+    :param x:
+        floating point coordinates along the x-axis.
+    :param y:
+        floating point coordinates along the y-axis.
+    :param h:
+        height of the 2D array.
+    :param w:
+        width of the 2D array
+    :param border_mode:
+        strategy to deal with borders.
+        Choices are ```nearest``` (default), ```mirror```, and ```wrap```.
+
+    :return:
+        the weights for bilinear interpolation and the integer coordinates.
+    """
+    x0_f = T.floor(x)
+    y0_f = T.floor(y)
+    x1_f = x0_f + 1
+    y1_f = y0_f + 1
+
+    if border_mode == 'nearest':
+        x0 = T.clamp(x0_f, 0, w - 1)
+        x1 = T.clamp(x1_f, 0, w - 1)
+        y0 = T.clamp(y0_f, 0, h - 1)
+        y1 = T.clamp(y1_f, 0, h - 1)
+    elif border_mode == 'mirror':
+        w = 2 * (w - 1)
+        x0 = T.min(x0_f % w, -x0_f % w)
+        x1 = T.min(x1_f % w, -x1_f % w)
+        h = 2 * (h - 1)
+        y0 = T.min(y0_f % h, -y0_f % h)
+        y1 = T.min(y1_f % h, -y1_f % h)
+    elif border_mode == 'wrap':
+        x0 = T.fmod(x0_f, w)
+        x1 = T.fmod(x1_f, w)
+        y0 = T.fmod(y0_f, h)
+        y1 = T.fmod(y1_f, h)
+    else:
+        raise ValueError("border_mode must be one of "
+                         "'nearest', 'mirror', 'wrap'")
+    x0, x1, y0, y1 = [v.long() for v in (x0, x1, y0, y1)]
+
+    wxy = dimshuffle((x1_f - x) * (y1_f - y), (0, 'x'))
+    wx1y = dimshuffle((x1_f - x) * (1. - (y1_f - y)), (0, 'x'))
+    w1xy = dimshuffle((1. - (x1_f - x)) * (y1_f - y), (0, 'x'))
+    w1x1y = dimshuffle((1. - (x1_f - x)) * (1. - (y1_f - y)), (0, 'x'))
+    return wxy, wx1y, w1xy, w1x1y, x0, x1, y0, y1
+
+
+def interpolate_bilinear(im, x, y, output_shape=None, border_mode='nearest'):
+    """
+    Returns a batch of interpolated images. Used for Spatial Transformer Network.
+    Works like `torch.grid_sample`.
+
+    :param im:
+        a batch of input images
+    :param x:
+        floating point coordinates along the x-axis.
+        Should be in the range [-1, 1].
+    :param y:
+        floating point coordinates along the y-axis.
+        Should be in the range [-1, 1].
+    :param output_shape:
+        output shape. A tuple of height and width.
+        If not specified, output will have the same shape as input.
+    :param border_mode:
+        strategy to deal with borders.
+        Choices are ```nearest``` (default), ```mirror```, and ```wrap```.
+    :return:
+        the bilinear interpolated batch of images.
+    """
+    if im.ndim != 4:
+        raise TypeError('im should be a 4D Tensor image, got %dD' % im.ndim)
+
+    output_shape = output_shape if output_shape else im.shape[2:]
+    x, y = x.flatten(), y.flatten()
+    n, c, h, w = im.shape
+    h_out, w_out = output_shape
+
+    # scale coordinates from [-1, 1] to [0, width/height - 1]
+    x = (x + 1) / 2 * (w - 1)
+    y = (y + 1) / 2 * (h - 1)
+    wxy, wx1y, w1xy, w1x1y, x0, x1, y0, y1 = get_bilinear_weights(
+        x, y, h, w, border_mode=border_mode)
+
+    base = T.arange(n) * w * h
+    base = T.reshape(base, (-1, 1))
+    base = repeat(base, (1, h_out * w_out))
+    base = base.flatten()
+
+    base_y0 = base + y0 * w
+    base_y1 = base + y1 * w
+    idx_a = base_y0 + x0
+    idx_b = base_y1 + x0
+    idx_c = base_y0 + x1
+    idx_d = base_y1 + x1
+
+    im_flat = T.reshape(dimshuffle(im, (0, 2, 3, 1)), (-1, c))
+    pixel_a = im_flat[idx_a]
+    pixel_b = im_flat[idx_b]
+    pixel_c = im_flat[idx_c]
+    pixel_d = im_flat[idx_d]
+
+    output = wxy * pixel_a + wx1y * pixel_b + w1xy * pixel_c + w1x1y * pixel_d
+    output = T.reshape(output, (n, h_out, w_out, c))
+    return dimshuffle(output, (0, 3, 1, 2))
 
 
 def batch_pairwise_dist(x, y):
