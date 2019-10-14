@@ -14,6 +14,7 @@ import pickle as pkl
 from imageio import imwrite
 import os
 import time
+import datetime
 import visdom
 from shutil import copyfile
 import torch as T
@@ -218,6 +219,7 @@ class Monitor:
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
                  use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
         self._iter = 0
+        self._last_epoch = 0
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
@@ -233,7 +235,6 @@ class Monitor:
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
-        self._last_epoch = 0
         self.print_freq = print_freq
         if current_folder:
             self.current_folder = current_folder
@@ -255,14 +256,17 @@ class Monitor:
                     print('No record found for \'options\'')
 
                 try:
-                    self.set_iter(log['iter'])
-                except KeyError:
-                    print('No record found for \'iter\'')
-
-                try:
                     self._last_epoch = log['epoch']
                 except KeyError:
-                    print('No record found for \'epoch\'')
+                    if num_iters:
+                        self._last_epoch = log['iter'] // num_iters
+                    else:
+                        print('No record found for \'epoch\'')
+
+                try:
+                    self.set_iter(self._last_epoch * num_iters if num_iters else log['iter'])
+                except KeyError:
+                    print('No record found for \'iter\'')
 
             except FileNotFoundError:
                 print('\'log.pkl\' not found in \'%s\'' % self.current_folder)
@@ -304,7 +308,6 @@ class Monitor:
         self._thread.start()
 
         self.num_iters = num_iters
-
         self.send_slack = send_slack
         if send_slack:
             assert kwargs.get('channel', None) is not None and kwargs.get('token', None) is not None, \
@@ -347,6 +350,19 @@ class Monitor:
         """
 
         self._iter = iter_num
+
+    def set_epoch(self, epoch):
+        """
+        sets the epoch for logging and keeping training status.
+        Should start from 0.
+
+        :param epoch:
+            epoch number. Should start from 0.
+        :return:
+            ``None``.
+        """
+
+        self._last_epoch = epoch
 
     def _set_num_stats(self, stats_dict):
         self._num_since_beginning.update(stats_dict)
@@ -915,8 +931,10 @@ class Monitor:
 
         elapsed_time = time.time() - self._timer
         time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
-        elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600. else elapsed_time / 3600.) + time_unit
-        log = 'Elapsed time {}\t{}\t{}'.format(elapsed_time, iter_show, '\t'.join(prints))
+        elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
+                                       else elapsed_time / 3600.) + time_unit
+        now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        log = '{} Elapsed time {}\t{}\t{}'.format(now, elapsed_time, iter_show, '\t'.join(prints))
         print(log)
 
         if self.send_slack:
