@@ -47,7 +47,8 @@ def setup_package():
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs']),
         cmdclass=CMD_CLASS,
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
+                          'imageio', 'gin-config', 'future', 'tensorboardX'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',

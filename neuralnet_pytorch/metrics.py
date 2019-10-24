@@ -4,7 +4,7 @@ import numpy as np
 
 from neuralnet_pytorch import utils
 
-__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss']
+__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'tv_reg']
 
 
 def huber_loss(x, y, reduction='mean'):
@@ -209,3 +209,17 @@ def psnr(x, y):
     """
 
     return -10 * T.log(T.mean((y - x) ** 2)) / np.log(10.)
+
+
+def tv_reg(y):
+    """
+    Total variation regularization.
+
+    :param y:
+        a tensor of at least 2D.
+        The last 2 dimensions will be regularized.
+    :return:
+        the total variation loss.
+    """
+
+    return T.sum(T.abs(y[..., :-1] - y[..., 1:])) + T.sum(T.abs(y[..., :-1, :] - y[..., 1:, :]))
