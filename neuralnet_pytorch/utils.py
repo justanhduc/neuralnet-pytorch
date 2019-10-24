@@ -96,6 +96,7 @@ def add_simple_repr(cls):
 def add_custom_repr(cls):
     """
     A decorator to add a custom repr to the designated class.
+    User should define extra_repr for the decorated class.
 
     :param cls:
         a subclass of :class:`~neuralnet_pytorch.layers.Module`.
@@ -317,7 +318,7 @@ def rgb2gray(img):
     Converts a batch of RGB images to gray.
 
     :param img:
-        an RGB image batch of any type.
+        a batch of RGB image tensors.
     :return:
         a batch of gray images.
     """
@@ -333,7 +334,7 @@ def rgb2ycbcr(img):
     Converts a batch of RGB images to YCbCr.
 
     :param img:
-        an RGB image batch of any type.
+        a batch of RGB image tensors.
     :return:
         a batch of YCbCr images.
     """
@@ -352,7 +353,7 @@ def ycbcr2rgb(img):
     Converts a batch of YCbCr images to RGB.
 
     :param img:
-        an YCbCr image batch of any type.
+        a batch of YCbCr image tensors.
     :return:
         a batch of RGB images.
     """
@@ -364,6 +365,103 @@ def ycbcr2rgb(img):
     G = img[:, 0] - .343 * (img[:, 1] - 128.) - .711 * (img[:, 2] - 128.)
     B = img[:, 0] + 1.765 * (img[:, 1] - 128.)
     return T.cat((R.unsqueeze(1), G.unsqueeze(1), B.unsqueeze(1)), 1)
+
+
+def rgba2rgb(img):
+    """
+    Converts a batch of RGBA images to RGB.
+
+    :param img:
+        an batch of RGBA image tensors.
+    :return:
+        a batch of RGB images.
+    """
+
+    r = img[..., 0, :, :]
+    g = img[..., 1, :, :]
+    b = img[..., 2, :, :]
+    a = img[..., 3, :, :]
+
+    shape = img.shape[:-3] + (3,) + img.shape[-2:]
+    out = T.zeros(*shape).to(img.device)
+    out[..., 0, :, :] = (1 - a) * r + a * r
+    out[..., 1, :, :] = (1 - a) * g + a * g
+    out[..., 2, :, :] = (1 - a) * b + a * b
+    return out
+
+
+def gram_matrix(x):
+    """
+    Computes the Gram matrix given a 4D tensor.
+
+    :param x:
+        a 4D tensor.
+    :return:
+        the Gram matrix of `x`.
+    """
+
+    a, b, c, d = x.size()
+    features = x.view(a * b, c * d)
+    G = T.mm(features, features.t())
+    return G.div(a * b * c * d)
+
+
+def var(x, dim=None, unbiased=True, keepdim=False):
+    """
+    Calculates the variance of `x` along `dim`.
+    Exists because :mod:`torch.var` sometimes causes some error in backward pass.
+
+    :param x:
+        a tensor.
+    :param dim:
+        the dimension along which to calculate the variance.
+        Can be `int`/`list`/`tuple`.
+    :param unbiased:
+        whether to use an unbiased estimate.
+        Default: `True`.
+    :param keepdim:
+        whether to keep the reduced dims as `1`.
+        Default: `False`.
+    :return:
+        the variance of `x`
+    """
+
+    if dim is None:
+        dim = tuple(i for i in range(len(x.shape)))
+
+    if isinstance(dim, numbers.Number):
+        dim = (int(dim),)
+
+    mean = T.mean(x, dim, keepdim=True)
+    dim_prod = np.prod([x.shape[i] for i in dim])
+    if unbiased:
+        dim_prod -= 1
+
+    var = T.sum((x - mean) ** 2, dim, keepdim=keepdim) / dim_prod
+    return var
+
+
+def std(x, dim=None, unbiased=True, keepdim=False):
+    """
+    Calculates the standard deviation of `x` along `dim`.
+    Exists because :mod:`torch.std` sometimes causes some error in backward pass.
+
+    :param x:
+        a tensor.
+    :param dim:
+        the dimension along which to calculate the variance.
+        Can be `int`/`list`/`tuple`.
+    :param unbiased:
+        whether to use an unbiased estimate.
+        Default: `True`.
+    :param keepdim:
+        whether to keep the reduced dims as `1`.
+        Default: `False`.
+    :return:
+        the standard deviation of `x`
+    """
+
+    return T.sqrt(var(x, dim, unbiased, keepdim) + 1e-8)
 
 
 def batch_set_value(params, values):
@@ -408,6 +506,25 @@ def to_cuda(x):
     return T.from_numpy(x).cuda()
 
 
+def to_cuda_sparse(coo):
+    """
+    Moves a sparse matrix to cuda tensor.
+
+    :param x:
+        a :class:`scipy.sparse.coo.coo_matrix`.
+    :return:
+        a :class:`torch.Tensor`.
+    """
+
+    values = coo.data
+    indices = np.vstack((coo.row, coo.col))
+
+    i = T.LongTensor(list(indices))
+    v = T.FloatTensor(values)
+    shape = coo.shape
+    return T.sparse.FloatTensor(i, v, T.Size(shape))
+
+
 def bulk_to_numpy(xs):
     """
     Moves a list of tensors to :class:`numpy.ndarray`.
@@ -434,6 +551,19 @@ def bulk_to_cuda(xs):
     return tuple([to_cuda(x) for x in xs])
 
 
+def bulk_to_cuda_sparse(xs):
+    """
+    Moves a list sparse matrices to cuda tensor.
+
+    :param x:
+        a list/tuple of :class:`scipy.sparse.coo.coo_matrix`.
+    :return:
+        a :class:`torch.Tensor`.
+    """
+
+    return tuple([to_cuda_sparse(x) for x in xs])
+
+
 def batch_to_cuda(batch):
     batch_cuda = [b.cuda() if not isinstance(b, (list, tuple))
                   else [bb.cuda() for bb in b] for b in batch]
@@ -451,7 +581,7 @@ def dimshuffle(x, pattern):
     :param x:
         Input tensor.
     :param pattern:
-        List/tuple of int mixed with 'x' for broadcastable dimensions.
+        List/tuple of int mixed with '~x' for broadcastable dimensions.
     :return:
         a tensor whose shape matches `pattern`.
 
@@ -526,7 +656,7 @@ def shape_padright(x, n_ones=1):
 
 def ravel_index(index, shape):
     """
-    Finds the linear index of `index` of a tensor of shape `shape`
+    Finds the linear index of `index` of a tensor of `shape`
     when it is flattened.
 
     :param index:
@@ -565,9 +695,9 @@ def tile(x, dims):
     :param x:
         a :mod:`torch.Tensor`.
     :param dims:
-        the number of times to repeat this tensor along each dimension.
+        the number of times to tile this tensor along each dimension.
     :return:
-        a new :mod:`torch.Tensor` whose elements are repeated elements in `x`.
+        the tiled tensor.
     """
 
     return x.repeat(*dims)
@@ -575,11 +705,17 @@ def tile(x, dims):
 
 def repeat(input, repeats, dim=None):
     """
-    Repeat elements of a tensor like `numpy.repeat`.
+    Repeats elements of a tensor like `numpy.repeat`.
     :param input:
+        a :mod:`torch.Tensor`.
     :param repeats:
+        the number of times to repeat this tensor along `dim`.
     :param dim:
+        the dimension to repeat.
+        If not specified, the method is applied to the flattened tensor.
+        Default: `None`.
     :return:
+        the repeated tensor.
     """
 
     return T.repeat_interleave(input, repeats, dim)
@@ -588,26 +724,26 @@ def repeat(input, repeats, dim=None):
 def block_diag(*blocks):
     """
     Modified from scipy.linalg.block_diag.
-    Create a block diagonal matrix from provided arrays.
+    Creates a block diagonal matrix from provided arrays.
     Given the inputs `A`, `B` and `C`, the output will have these
     arrays arranged on the diagonal::
         [[A, 0, 0],
          [0, B, 0],
          [0, 0, C]]
-    Parameters
-    ----------
-    A, B, C, ... : array_like, up to 2-D
-        Input arrays.  A 1-D array or array_like sequence of length `n`is
-        treated as a 2-D array with shape ``(1,n)``.
-    Returns
-    -------
-    D : ndarray
-        Array with `A`, `B`, `C`, ... on the diagonal.  `D` has the
-        same dtype as `A`.
+
+    :param blocks
+        an iterator of tensors, up to 2-D
+        a 1-D tensor of length `n`is treated as a 2-D array
+        with shape ``(1,n)``.
+    :return
+        a tensor with `A`, `B`, `C`, ... on the diagonal.
+        Has the same dtype as `A`.
+
     Notes
     -----
     If all the input arrays are square, the output is known as a
     block diagonal matrix.
+
     Examples
     --------
     >>> from neuralnet_pytorch.utils import block_diag
@@ -628,10 +764,10 @@ def block_diag(*blocks):
            [ 0.,  0.,  0.,  4.,  5.],
            [ 0.,  0.,  0.,  6.,  7.]])
     """
-    assert all(a.ndim >= 2 for a in blocks), 'All tensors must be at least of rank 2'
+    assert all(a.ndimension() >= 2 for a in blocks), 'All tensors must be at least of rank 2'
 
     shapes = np.array([a.shape for a in blocks])
-    out = T.zeros(*list(np.sum(shapes, axis=0)), dtype=blocks[0].dtype)
+    out = T.zeros(*list(np.sum(shapes, axis=0))).to(blocks[0].device)
 
     r, c = 0, 0
     for i, (rr, cc) in enumerate(shapes):

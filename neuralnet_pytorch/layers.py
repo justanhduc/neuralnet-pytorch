@@ -372,7 +372,7 @@ def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwa
                 self.cuda(device)
 
         def forward(self, input, *args, **kwargs):
-            return super().forward(input)
+            return super().forward(input, *args, **kwargs)
 
         @property
         @utils.validate
@@ -559,9 +559,10 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
-        pad = nn.ReflectionPad2d(self.padding) if self.border_mode == 'ref' else nn.ReplicationPad2d(
-            (self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2,
-             self.ks[0] // 2)) if self.border_mode == 'rep' else lambda x: x
+        pad = nn.ReflectionPad2d((self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)) \
+            if self.border_mode == 'ref' \
+            else nn.ReplicationPad2d((self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)) \
+            if self.border_mode == 'rep' else lambda x: x
         input = pad(input)
         input = self.activation(super().forward(input))
         return input

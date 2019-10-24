@@ -210,10 +210,10 @@ class Monitor:
     current_folder
         path to the current run.
     vis
-        an instance of :mod:`Visdom` when `~use_visdom` is set to ``True``.
+        an instance of :mod:`Visdom` when `use_visdom` is set to ``True``.
     writer
         an instance of Tensorboard's :class:`SummaryWriter`
-        when `~use_tensorboard` is set to ``True``.
+        when `use_tensorboard` is set to ``True``.
     """
 
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
@@ -317,6 +317,19 @@ class Monitor:
                 kwargs['username'] = 'me'
 
         self.kwargs = kwargs
+
+        # make folders to store statistics
+        self.plots_folder = os.path.join(self.current_folder, 'plots')
+        os.makedirs(self.plots_folder, exist_ok=True)
+
+        self.files_folder = os.path.join(self.current_folder, 'files')
+        os.makedirs(self.files_folder, exist_ok=True)
+
+        self.images_folder = os.path.join(self.current_folder, 'images')
+        os.makedirs(self.images_folder, exist_ok=True)
+
+        self.hists_folder = os.path.join(self.current_folder, 'histograms')
+        os.makedirs(self.hists_folder, exist_ok=True)
 
         atexit.register(self._atexit)
         print('Result folder: %s' % self.current_folder)
@@ -614,25 +627,30 @@ class Monitor:
             nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
             type(network))
         self.dump_rep('network.txt', network)
-        if self.use_tensorboard:
-            self.writer.add_graph(network, *args, **kwargs)
 
-    def copy_files(self, files):
+    def backup(self, files):
         """
         saves a copy of the given files to :attr:`~current_folder`.
         Accepts a str or list/tuple of file names.
+        You can backup your codes and/or config files for later use.
 
         :param files:
             file to be saved.
         :return: ``None``.
         """
+        assert isinstance(files, (str, list, tuple)), \
+            'unknown type of \'files\'. Expect list, tuple or string, got {}'.format(type(files))
 
         files = (files,) if isinstance(files, str) else files
         for file in files:
             try:
-                copyfile(file, '%s/%s' % (self.current_folder, os.path.split(file)[1]))
+                copyfile(file, '%s/%s' % (self.files_folder, os.path.split(file)[1]))
             except FileNotFoundError:
                 print('No such file or directory: %s' % file)
+
+    @utils.deprecated(backup, '1.1.0')
+    def copy_files(self, files):
+        self.backup(files)
 
     def tick(self):
         """
@@ -710,16 +728,8 @@ class Monitor:
 
         self._img_since_last_flush[name][self._iter] = value
         if self.use_tensorboard:
-            self.writer.add_image('image/' + name.replace(' ', '-'), value, self._iter)
-
-    @utils.deprecated(imwrite, '0.0.6')
-    def save_image(self, name: str, value):
-        """
-        schedules to save images.
-        Deprecated in favor of :meth:`~imwrite`.
-        """
-
-        self.imwrite(name, value)
+            for idx, img in enumerate(value):
+                self.writer.add_image('image/' + name.replace(' ', '-') + '-%d' % idx, img, self._iter)
 
     def hist(self, name, value, n_bins=20, latest=False):
         """
@@ -799,7 +809,7 @@ class Monitor:
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
 
-            fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
+            fig.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '.jpg'))
             if self.use_visdom:
                 self.vis.matplot(fig, win=name)
             fig.clear()
@@ -822,21 +832,24 @@ class Monitor:
                             img = np.transpose(img, (1, 2, 0))
 
                             if latest:
-                                imwrite(os.path.join(self.current_folder,
+                                imwrite(os.path.join(self.images_folder,
                                                      name.replace(' ', '_') + '_%d.jpg' % num), img)
                             else:
-                                imwrite(os.path.join(self.current_folder,
+                                imwrite(os.path.join(self.images_folder,
                                                      name.replace(' ', '_') + '_%d_%d.jpg' % (itt, num)), img)
 
                         else:
                             for ch in range(img.shape[0]):
                                 img_normed = (img[ch] - np.min(img[ch])) / (np.max(img[ch]) - np.min(img[ch]))
+                                # in case all image values are the same
+                                img_normed[np.isnan(img_normed)] = 0
+                                img_normed[np.isinf(img_normed)] = 0
 
                                 if latest:
-                                    imwrite(os.path.join(self.current_folder,
+                                    imwrite(os.path.join(self.images_folder,
                                                          name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
                                 else:
-                                    imwrite(os.path.join(self.current_folder,
+                                    imwrite(os.path.join(self.images_folder,
                                                          name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)),
                                             img_normed)
 
@@ -845,9 +858,9 @@ class Monitor:
                         self.vis.image(val if len(val.shape) == 2 else np.transpose(val, (2, 0, 1)), win=name)
 
                     if latest:
-                        imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'), val)
+                        imwrite(os.path.join(self.images_folder, name.replace(' ', '_') + '.jpg'), val)
                     else:
-                        imwrite(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
+                        imwrite(os.path.join(self.images_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
 
                 else:
                     raise NotImplementedError
@@ -881,7 +894,7 @@ class Monitor:
                 surf = ax.plot_surface(x_vals, z_vals, y_vals, cmap=cm.coolwarm, linewidth=0, antialiased=False)
                 ax.view_init(45, -90)
                 fig.colorbar(surf, shrink=0.5, aspect=5)
-            fig.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_hist.jpg'))
+            fig.savefig(os.path.join(self.hists_folder, name.replace(' ', '_') + '_hist.jpg'))
             fig.clear()
 
         # scatter pointcloud(s)
@@ -893,9 +906,9 @@ class Monitor:
                     ax.scatter(*[val[:, i] for i in range(val.shape[-1])])
 
                     if latest:
-                        plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '.jpg'))
+                        plt.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '.jpg'))
                     else:
-                        plt.savefig(os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
+                        plt.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
 
                 elif len(val.shape) == 3:
                     for ii in range(val.shape[0]):
@@ -903,9 +916,9 @@ class Monitor:
                         ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
                         if latest:
                             plt.savefig(
-                                os.path.join(self.current_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
+                                os.path.join(self.plots_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
                         else:
-                            plt.savefig(os.path.join(self.current_folder,
+                            plt.savefig(os.path.join(self.plots_folder,
                                                      name.replace(' ', '_') + '_%d_%d.jpg' % (itt, ii + 1)))
 
                         fig.clear()
@@ -917,7 +930,7 @@ class Monitor:
             fig.clear()
         plt.close('all')
 
-        with open(os.path.join(self.current_folder, 'log.pkl'), 'wb') as f:
+        with open(os.path.join(self.files_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({'iter': it, 'epoch': self._last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
@@ -987,7 +1000,7 @@ class Monitor:
             pkl.dump(self._dump_files, f, pkl.HIGHEST_PROTOCOL)
         return versioned_filename
 
-    def dump(self, name, obj, type='pickle', keep=-1, **kwargs):
+    def dump(self, name, obj, type='pickle', func=None, keep=-1, **kwargs):
         """
         saves the given object.
 
@@ -1005,6 +1018,8 @@ class Monitor:
             ```txt```: use :func:`numpy.savetxt` to store object.
 
             Default: ```pickle```.
+        :param func:
+            custom method for dumping the given object.
         :param keep:
             the number of versions of the saved file to keep.
             Default: -1 (keeps only the latest version).
@@ -1013,9 +1028,9 @@ class Monitor:
         :return: ``None``.
         """
 
-        self._dump(name.replace(' ', '_'), obj, keep, self._io_method[type + '_save'], **kwargs)
+        self._dump(name.replace(' ', '_'), obj, keep, self._io_method[type + '_save'], func, **kwargs)
 
-    def load(self, file, type='pickle', version=-1, **kwargs):
+    def load(self, file, type='pickle', func=None, version=-1, **kwargs):
         """
         loads from the given file.
 
@@ -1031,6 +1046,8 @@ class Monitor:
             ```txt```: use :func:`numpy.loadtxt` to store object.
 
             Default: ```pickle```.
+        :param func:
+            custome method for loading the given file.
         :param version:
             the version of the saved file to load.
             Default: -1 (loads the latest version of the saved file).
@@ -1039,26 +1056,26 @@ class Monitor:
         :return: ``None``.
         """
 
-        return self._load(file, self._io_method[type + '_load'], version, **kwargs)
+        return self._load(file, self._io_method[type + '_load'], func, version, **kwargs)
 
-    def _dump(self, name, obj, keep, method, **kwargs):
-        """Should not be called directly."""
+    def _dump(self, name, obj, keep, method, custom_method, **kwargs):
         assert isinstance(keep, int), 'keep must be an int, got %s' % type(keep)
 
+        dump = method if custom_method is None else custom_method
         if keep < 2:
             name = os.path.join(self.current_folder, name)
-            method(name, obj, **kwargs)
+            dump(name, obj, **kwargs)
             print('Object dumped to %s' % name)
         else:
             normed_name = self._version(name, keep)
             normed_name = os.path.join(self.current_folder, normed_name)
-            method(normed_name, obj, **kwargs)
+            dump(normed_name, obj, **kwargs)
             print('Object dumped to %s' % normed_name)
 
-    def _load(self, file, method, version=-1, **kwargs):
-        """Should not be called directly."""
+    def _load(self, file, method, custom_method, version=-1, **kwargs):
         assert isinstance(version, int), 'keep must be an int, got %s' % type(version)
 
+        load = method if custom_method is None else method
         full_file = os.path.join(self.current_folder, file)
         try:
             with open(os.path.join(self.current_folder, '_version.pkl'), 'rb') as f:
@@ -1067,7 +1084,7 @@ class Monitor:
             versions = self._dump_files.get(file, [])
             if len(versions) == 0:
                 try:
-                    obj = method(full_file, **kwargs)
+                    obj = load(full_file, **kwargs)
                 except FileNotFoundError:
                     print('No file named %s found' % file)
                     return None
@@ -1075,20 +1092,20 @@ class Monitor:
                 if version <= 0:
                     if len(versions) > 0:
                         latest = versions[-1]
-                        obj = method(os.path.join(self.current_folder, latest), **kwargs)
+                        obj = load(os.path.join(self.current_folder, latest), **kwargs)
                     else:
-                        return method(full_file, **kwargs)
+                        return load(full_file, **kwargs)
                 else:
                     name, ext = os.path.splitext(file)
                     file_name = os.path.normpath(name + '-%d' % version + ext)
                     if file_name in versions:
-                        obj = method(os.path.join(self.current_folder, file_name), **kwargs)
+                        obj = load(os.path.join(self.current_folder, file_name), **kwargs)
                     else:
                         print('Version %d of %s is not found in %s' % (version, file, self.current_folder))
                         return None
         except FileNotFoundError:
             try:
-                obj = method(full_file, **kwargs)
+                obj = load(full_file, **kwargs)
             except FileNotFoundError:
                 print('No file named %s found' % file)
                 return None

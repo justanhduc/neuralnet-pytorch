@@ -57,7 +57,7 @@ def test_monitor():
         a = a.cuda()
     n_loops = 5
 
-    mon = nnt.Monitor()
+    mon = nnt.Monitor(use_tensorboard=True)
     mon.dump('foo.pkl', a)
     loaded = mon.load('foo.pkl')
     testing.assert_allclose(a, loaded)
@@ -66,6 +66,10 @@ def test_monitor():
     for i in range(n_loops):
         with mon:
             mon.dump('foo.pkl', a + i, keep=3)
+            mon.plot('parabol', i ** 2)
+            mon.hist('histogram', a)
+            mon.imwrite('image', a[None, None])
+
     loaded = mon.load('foo.pkl', version=2)
     testing.assert_allclose(a + 2., loaded)
     mon.reset()

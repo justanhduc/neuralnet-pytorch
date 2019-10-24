@@ -56,7 +56,8 @@ def setup_package():
         ],
         dependency_links=['https://github.com/szagoruyko/pyinn/tarball/master#egg=pyinn'],
         cmdclass=CMD_CLASS,
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly'],
+        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
+                          'imageio', 'gin-config', 'future', 'tensorboardX'],
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',
