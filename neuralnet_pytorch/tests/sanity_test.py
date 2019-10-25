@@ -479,3 +479,59 @@ def test_sum():
     expected = a + m1(a) + m2(m1(a)) + b
     testing.assert_allclose(seq_sum(a), expected)
     testing.assert_allclose(seq_sum.output_shape, expected.shape)
+
+
+def test_spectral_norm():
+    from copy import deepcopy
+    import torch.nn as nn
+
+    seed = 48931
+    input = T.rand(10, 3, 5, 5)
+    if nnt.cuda_available:
+        input = input.cuda()
+
+    net = nnt.Sequential(
+        nnt.Sequential(
+            nnt.Conv2d(3, 16, 3),
+            nnt.Conv2d(16, 32, 3)
+        ),
+        nnt.Sequential(
+            nnt.Conv2d(32, 64, 3),
+            nnt.Conv2d(64, 128, 3),
+        ),
+        nnt.BatchNorm2d(128),
+        nnt.GroupNorm(128, 4),
+        nnt.LayerNorm((None, 128, 5, 5)),
+        nnt.GlobalAvgPool2D(),
+        nnt.FC(128, 1)
+    )
+
+    net_pt_sn = deepcopy(net)
+    T.manual_seed(seed)
+    if cuda_available:
+        T.cuda.manual_seed_all(seed)
+
+    net_pt_sn[0][0] = nn.utils.spectral_norm(net_pt_sn[0][0])
+    net_pt_sn[0][1] = nn.utils.spectral_norm(net_pt_sn[0][1])
+    net_pt_sn[1][0] = nn.utils.spectral_norm(net_pt_sn[1][0])
+    net_pt_sn[1][1] = nn.utils.spectral_norm(net_pt_sn[1][1])
+    net_pt_sn[6] = nn.utils.spectral_norm(net_pt_sn[6])
+
+    T.manual_seed(seed)
+    if cuda_available:
+        T.cuda.manual_seed_all(seed)
+
+    net_nnt_sn = nnt.spectral_norm(net)
+
+    net_pt_sn(input)
+    net_nnt_sn(input)
+
+    assert not hasattr(net_nnt_sn[2], 'weight_u')
+    assert not hasattr(net_nnt_sn[3], 'weight_u')
+    assert not hasattr(net_nnt_sn[4], 'weight_u')
+
+    testing.assert_allclose(net_pt_sn[0][0].weight, net_nnt_sn[0][0].weight)
+    testing.assert_allclose(net_pt_sn[0][1].weight, net_nnt_sn[0][1].weight)
+    testing.assert_allclose(net_pt_sn[1][0].weight, net_nnt_sn[1][0].weight)
+    testing.assert_allclose(net_pt_sn[1][1].weight, net_nnt_sn[1][1].weight)
+    testing.assert_allclose(net_pt_sn[6].weight, net_nnt_sn[6].weight)
