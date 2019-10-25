@@ -1,10 +1,12 @@
 import torch as T
 import torch.nn.functional as F
 import numpy as np
+import torch.nn as nn
 
+import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
 
-__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'tv_reg']
+__all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'tv_reg', 'spectral_norm']
 
 
 def huber_loss(x, y, reduction='mean'):
@@ -223,3 +225,42 @@ def tv_reg(y):
     """
 
     return T.sum(T.abs(y[..., :-1] - y[..., 1:])) + T.sum(T.abs(y[..., :-1, :] - y[..., 1:, :]))
+
+
+def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=None):
+    """
+    Applies :func:`torch.nn.utils.spectral_norm` recursively to `module` and all of
+    its submodules.
+
+    :param module:
+        containing module.
+    :param name:
+        name of weight parameter.
+        Default: ```weight```.
+    :param n_power_iterations:
+        number of power iterations to calculate spectral norm.
+    :param eps:
+        epsilon for numerical stability in calculating norms.
+    :param dim:
+        dimension corresponding to number of outputs,
+        the default is ``0``, except for modules that are instances of
+        ConvTranspose{1,2,3}d, when it is ``1``.
+    :return:
+        the original module with the spectral norm hook.
+    """
+
+    if hasattr(module, 'weight'):
+        if dim is None:
+            dim = 1 if isinstance(module, nnt.ConvTranspose2d) else 0
+
+        if not isinstance(module, (nn.modules.batchnorm._BatchNorm,
+                                   nn.GroupNorm,
+                                   nn.LayerNorm)):
+            module = nn.utils.spectral_norm(module, name, n_power_iterations, eps, dim)
+
+        return module
+    else:
+        for mod_name, mod in module.named_children():
+            mod = spectral_norm(mod, name, n_power_iterations, eps, dim)
+            module.__setattr__(mod_name, mod)
+        return module

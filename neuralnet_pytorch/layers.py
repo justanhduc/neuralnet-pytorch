@@ -138,7 +138,8 @@ class _LayerMethod:
         assert not hasattr(super(), 'regularizable')
         params = []
         if hasattr(self, 'weight'):
-            params += [self.weight]
+            if self.weight.requires_grad:
+                params += [self.weight]
 
         for m in list(self.children()):
             if hasattr(m, 'regularizable'):
