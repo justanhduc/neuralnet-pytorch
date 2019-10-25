@@ -5,6 +5,9 @@
 :mod:`normalization` -- Normalization Layers
 ============================================
 
+.. contents:: Contents
+   :depth: 4
+
 Extended Normalization Layers
 =============================
 

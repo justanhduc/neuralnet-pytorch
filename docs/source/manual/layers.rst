@@ -12,6 +12,9 @@
 
 This section describes all the backbone modules of Neuralnet-pytorch.
 
+.. contents:: Contents
+   :depth: 4
+
 Abstract Layers
 ===============
 
@@ -57,16 +60,22 @@ Extra Layers
 
 .. autoclass:: neuralnet_pytorch.layers.Activation
 .. autoclass:: neuralnet_pytorch.layers.ConvNormAct
-.. autoclass:: neuralnet_pytorch.layers.FCNormAct
-.. autoclass:: neuralnet_pytorch.layers.StackingConv
 .. autoclass:: neuralnet_pytorch.layers.DepthwiseSepConv2D
+.. autoclass:: neuralnet_pytorch.layers.FCNormAct
 .. autoclass:: neuralnet_pytorch.layers.ResNetBasicBlock
 .. autoclass:: neuralnet_pytorch.layers.ResNetBottleneckBlock
+.. autoclass:: neuralnet_pytorch.layers.StackingConv
+
+Graph Learning Layers
+---------------------
+
 .. autoclass:: neuralnet_pytorch.layers.GraphConv
+.. autoclass:: neuralnet_pytorch.layers.BatchGraphConv
+.. autoclass:: neuralnet_pytorch.layers.GraphXConv
 
 Multi-module Layers
 -------------------
 
 .. autoclass:: neuralnet_pytorch.layers.Sum
-.. autoclass:: neuralnet_pytorch.layers.SequentialSum
 .. autoclass:: neuralnet_pytorch.layers.ConcurrentSum
+.. autoclass:: neuralnet_pytorch.layers.SequentialSum

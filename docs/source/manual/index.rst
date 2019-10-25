@@ -15,7 +15,7 @@ The basic contents of our package are as follows.
 Neuralnet Layers
 ----------------
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 4
 
     layers
     normalization
@@ -24,7 +24,7 @@ Neuralnet Layers
 Monitor Network Training
 ------------------------
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 4
 
     monitor
     track
@@ -32,20 +32,20 @@ Monitor Network Training
 Optimization
 ------------
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 4
 
     optimization
 
 Additional Metrics
 ------------------
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 4
 
     metrics
 
 Extras
 ---------
 .. toctree::
-    :maxdepth: 2
+    :maxdepth: 4
 
     utilities

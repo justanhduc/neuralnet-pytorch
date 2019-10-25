@@ -38,7 +38,7 @@ find some reminiscence as many functions are highly inspired by Theano.
 
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 4
    :caption: Overview:
 
    installation

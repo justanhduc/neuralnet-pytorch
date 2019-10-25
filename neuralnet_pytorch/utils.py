@@ -32,6 +32,7 @@ def _make_input_shape(m, n):
     def parse(x):
         if isinstance(x, container_abcs.Iterable):
             return x
+
         return tuple(repeat_(None, m)) + (x, ) + tuple(repeat_(None, n))
     return parse
 
@@ -415,13 +416,13 @@ def var(x, dim=None, unbiased=True, keepdim=False):
         a tensor.
     :param dim:
         the dimension along which to calculate the variance.
-        Can be `int`/`list`/`tuple`.
+        Can be ``int``/``list``/``tuple``.
     :param unbiased:
         whether to use an unbiased estimate.
-        Default: `True`.
+        Default: ``True``.
     :param keepdim:
-        whether to keep the reduced dims as `1`.
-        Default: `False`.
+        whether to keep the reduced dims as ``1``.
+        Default: ``False``.
     :return:
         the variance of `x`
     """
@@ -450,13 +451,13 @@ def std(x, dim=None, unbiased=True, keepdim=False):
         a tensor.
     :param dim:
         the dimension along which to calculate the variance.
-        Can be `int`/`list`/`tuple`.
+        Can be ``int``/``list``/``tuple``.
     :param unbiased:
         whether to use an unbiased estimate.
-        Default: `True`.
+        Default: ``True``.
     :param keepdim:
-        whether to keep the reduced dims as `1`.
-        Default: `False`.
+        whether to keep the reduced dims as ``1``.
+        Default: ``False``.
     :return:
         the standard deviation of `x`
     """
@@ -581,7 +582,7 @@ def dimshuffle(x, pattern):
     :param x:
         Input tensor.
     :param pattern:
-        List/tuple of int mixed with '~x' for broadcastable dimensions.
+        List/tuple of int mixed with `x` for broadcastable dimensions.
     :return:
         a tensor whose shape matches `pattern`.
 
@@ -691,6 +692,7 @@ def ravel_index(index, shape):
 def tile(x, dims):
     """
     Repeats `x` along `dims`.
+    Behaves like :func:`numpy.tile`.
 
     :param x:
         a :mod:`torch.Tensor`.
@@ -705,7 +707,8 @@ def tile(x, dims):
 
 def repeat(input, repeats, dim=None):
     """
-    Repeats elements of a tensor like `numpy.repeat`.
+    Repeats elements of a tensor like :func:`numpy.repeat`.
+
     :param input:
         a :mod:`torch.Tensor`.
     :param repeats:
@@ -713,7 +716,7 @@ def repeat(input, repeats, dim=None):
     :param dim:
         the dimension to repeat.
         If not specified, the method is applied to the flattened tensor.
-        Default: `None`.
+        Default: ``None``.
     :return:
         the repeated tensor.
     """
@@ -727,15 +730,16 @@ def block_diag(*blocks):
     Creates a block diagonal matrix from provided arrays.
     Given the inputs `A`, `B` and `C`, the output will have these
     arrays arranged on the diagonal::
+
         [[A, 0, 0],
          [0, B, 0],
          [0, 0, C]]
 
-    :param blocks
-        an iterator of tensors, up to 2-D
-        a 1-D tensor of length `n`is treated as a 2-D array
-        with shape ``(1,n)``.
-    :return
+    :param blocks:
+        an iterator of tensors, up to 2-D.
+        A 1-D tensor of length `n` is treated as a 2-D array
+        with shape `(1,n)`.
+    :return:
         a tensor with `A`, `B`, `C`, ... on the diagonal.
         Has the same dtype as `A`.
 
@@ -746,6 +750,7 @@ def block_diag(*blocks):
 
     Examples
     --------
+
     >>> from neuralnet_pytorch.utils import block_diag
     >>> A = T.tensor([[1, 0],
     ...               [0, 1]])
@@ -764,6 +769,7 @@ def block_diag(*blocks):
            [ 0.,  0.,  0.,  4.,  5.],
            [ 0.,  0.,  0.,  6.,  7.]])
     """
+
     assert all(a.ndimension() >= 2 for a in blocks), 'All tensors must be at least of rank 2'
 
     shapes = np.array([a.shape for a in blocks])
@@ -793,7 +799,6 @@ def smooth(x, beta=.9, window='hanning'):
         the type of window from ```flat```, ```hanning```, ```hamming```,
         ```bartlett```, and ```blackman```.
         Flat window will produce a moving average smoothing.
-
     :return:
         the smoothed signal.
 
@@ -849,10 +854,10 @@ def get_bilinear_weights(x, y, h, w, border_mode='nearest'):
     :param border_mode:
         strategy to deal with borders.
         Choices are ```nearest``` (default), ```mirror```, and ```wrap```.
-
     :return:
         the weights for bilinear interpolation and the integer coordinates.
     """
+
     x0_f = T.floor(x)
     y0_f = T.floor(y)
     x1_f = x0_f + 1
@@ -954,10 +959,10 @@ def batch_pairwise_dist(x, y):
         a tensor of shape (m, nx, d).
     :param y:
         a tensor of shape (m, ny, d).
-
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
+
     bs, num_points_x, points_dim = x.size()
     _, num_points_y, _ = y.size()
     xx = T.bmm(x, x.transpose(2, 1))
@@ -988,10 +993,10 @@ def time_cuda_module(f, *args, **kwargs):
         arguments to be passed to `f`.
     :param kwargs:
         keyword arguments to be passed to `f`.
-
     :return:
         the time (in second) that `f` takes.
     """
+
     start = T.cuda.Event(enable_timing=True)
     end = T.cuda.Event(enable_timing=True)
 
