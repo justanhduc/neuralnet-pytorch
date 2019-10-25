@@ -32,6 +32,7 @@ def _make_input_shape(m, n):
     def parse(x):
         if isinstance(x, container_abcs.Iterable):
             return x
+
         return tuple(repeat_(None, m)) + (x, ) + tuple(repeat_(None, n))
     return parse
 
@@ -691,6 +692,7 @@ def ravel_index(index, shape):
 def tile(x, dims):
     """
     Repeats `x` along `dims`.
+    Behaves like :func:`numpy.tile`.
 
     :param x:
         a :mod:`torch.Tensor`.
@@ -705,7 +707,7 @@ def tile(x, dims):
 
 def repeat(input, repeats, dim=None):
     """
-    Repeats elements of a tensor like `numpy.repeat`.
+    Repeats elements of a tensor like :func:`numpy.repeat`.
 
     :param input:
         a :mod:`torch.Tensor`.
@@ -734,8 +736,8 @@ def block_diag(*blocks):
          [0, 0, C]]
 
     :param blocks:
-        an iterator of tensors, up to 2-D
-        a 1-D tensor of length `n` is treated as a 2-D array
+        an iterator of tensors, up to 2-D.
+        A 1-D tensor of length `n` is treated as a 2-D array
         with shape `(1,n)`.
     :return:
         a tensor with `A`, `B`, `C`, ... on the diagonal.

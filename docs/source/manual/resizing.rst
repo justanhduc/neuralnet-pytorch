@@ -5,6 +5,9 @@
 :mod:`resizing` -- Resizing Layers
 ==================================
 
+.. contents:: Contents
+   :depth: 4
+
 Extended Resizing Layers
 ========================
 

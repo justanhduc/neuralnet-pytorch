@@ -14,7 +14,7 @@ import pickle as pkl
 from imageio import imwrite
 import os
 import time
-import datetime
+from datetime import datetime as dt
 import visdom
 from shutil import copyfile
 import torch as T
@@ -214,6 +214,14 @@ class Monitor:
     writer
         an instance of Tensorboard's :class:`SummaryWriter`
         when `use_tensorboard` is set to ``True``.
+    plot_folder
+        path to the folder containing the collected plots.
+    file_folder
+        path to the folder containing the collected files.
+    image_folder
+        path to the folder containing the collected images.
+    hist_folder
+        path to the folder containing the collected histograms.
     """
 
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
@@ -319,18 +327,19 @@ class Monitor:
         self.kwargs = kwargs
 
         # make folders to store statistics
-        self.plots_folder = os.path.join(self.current_folder, 'plots')
-        os.makedirs(self.plots_folder, exist_ok=True)
+        self.plot_folder = os.path.join(self.current_folder, 'plots')
+        os.makedirs(self.plot_folder, exist_ok=True)
 
-        self.files_folder = os.path.join(self.current_folder, 'files')
-        os.makedirs(self.files_folder, exist_ok=True)
+        self.file_folder = os.path.join(self.current_folder, 'files')
+        os.makedirs(self.file_folder, exist_ok=True)
 
-        self.images_folder = os.path.join(self.current_folder, 'images')
-        os.makedirs(self.images_folder, exist_ok=True)
+        self.image_folder = os.path.join(self.current_folder, 'images')
+        os.makedirs(self.image_folder, exist_ok=True)
 
-        self.hists_folder = os.path.join(self.current_folder, 'histograms')
-        os.makedirs(self.hists_folder, exist_ok=True)
+        self.hist_folder = os.path.join(self.current_folder, 'histograms')
+        os.makedirs(self.hist_folder, exist_ok=True)
 
+        # schedule to flush when the program finishes
         atexit.register(self._atexit)
         print('Result folder: %s' % self.current_folder)
 
@@ -644,7 +653,7 @@ class Monitor:
         files = (files,) if isinstance(files, str) else files
         for file in files:
             try:
-                copyfile(file, '%s/%s' % (self.files_folder, os.path.split(file)[1]))
+                copyfile(file, '%s/%s' % (self.file_folder, os.path.split(file)[1]))
             except FileNotFoundError:
                 print('No such file or directory: %s' % file)
 
@@ -809,7 +818,7 @@ class Monitor:
                 plt.plot(x_vals, y_vals)
                 prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
 
-            fig.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '.jpg'))
+            fig.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
             if self.use_visdom:
                 self.vis.matplot(fig, win=name)
             fig.clear()
@@ -832,10 +841,10 @@ class Monitor:
                             img = np.transpose(img, (1, 2, 0))
 
                             if latest:
-                                imwrite(os.path.join(self.images_folder,
+                                imwrite(os.path.join(self.image_folder,
                                                      name.replace(' ', '_') + '_%d.jpg' % num), img)
                             else:
-                                imwrite(os.path.join(self.images_folder,
+                                imwrite(os.path.join(self.image_folder,
                                                      name.replace(' ', '_') + '_%d_%d.jpg' % (itt, num)), img)
 
                         else:
@@ -846,10 +855,10 @@ class Monitor:
                                 img_normed[np.isinf(img_normed)] = 0
 
                                 if latest:
-                                    imwrite(os.path.join(self.images_folder,
+                                    imwrite(os.path.join(self.image_folder,
                                                          name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
                                 else:
-                                    imwrite(os.path.join(self.images_folder,
+                                    imwrite(os.path.join(self.image_folder,
                                                          name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)),
                                             img_normed)
 
@@ -858,9 +867,9 @@ class Monitor:
                         self.vis.image(val if len(val.shape) == 2 else np.transpose(val, (2, 0, 1)), win=name)
 
                     if latest:
-                        imwrite(os.path.join(self.images_folder, name.replace(' ', '_') + '.jpg'), val)
+                        imwrite(os.path.join(self.image_folder, name.replace(' ', '_') + '.jpg'), val)
                     else:
-                        imwrite(os.path.join(self.images_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
+                        imwrite(os.path.join(self.image_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
 
                 else:
                     raise NotImplementedError
@@ -894,7 +903,7 @@ class Monitor:
                 surf = ax.plot_surface(x_vals, z_vals, y_vals, cmap=cm.coolwarm, linewidth=0, antialiased=False)
                 ax.view_init(45, -90)
                 fig.colorbar(surf, shrink=0.5, aspect=5)
-            fig.savefig(os.path.join(self.hists_folder, name.replace(' ', '_') + '_hist.jpg'))
+            fig.savefig(os.path.join(self.hist_folder, name.replace(' ', '_') + '_hist.jpg'))
             fig.clear()
 
         # scatter pointcloud(s)
@@ -906,9 +915,9 @@ class Monitor:
                     ax.scatter(*[val[:, i] for i in range(val.shape[-1])])
 
                     if latest:
-                        plt.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '.jpg'))
+                        plt.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
                     else:
-                        plt.savefig(os.path.join(self.plots_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
+                        plt.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
 
                 elif len(val.shape) == 3:
                     for ii in range(val.shape[0]):
@@ -916,9 +925,9 @@ class Monitor:
                         ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
                         if latest:
                             plt.savefig(
-                                os.path.join(self.plots_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
+                                os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
                         else:
-                            plt.savefig(os.path.join(self.plots_folder,
+                            plt.savefig(os.path.join(self.plot_folder,
                                                      name.replace(' ', '_') + '_%d_%d.jpg' % (itt, ii + 1)))
 
                         fig.clear()
@@ -930,7 +939,7 @@ class Monitor:
             fig.clear()
         plt.close('all')
 
-        with open(os.path.join(self.files_folder, 'log.pkl'), 'wb') as f:
+        with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
             pkl.dump({'iter': it, 'epoch': self._last_epoch,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
@@ -946,7 +955,7 @@ class Monitor:
         time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
         elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
                                        else elapsed_time / 3600.) + time_unit
-        now = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        now = dt.now().strftime("%d/%m/%Y %H:%M:%S")
         log = '{} Elapsed time {}\t{}\t{}'.format(now, elapsed_time, iter_show, '\t'.join(prints))
         print(log)
 
