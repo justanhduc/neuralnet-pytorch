@@ -531,7 +531,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         self.input_shape = input_shape
         kernel_size = _pair(kernel_size)
         self.no_bias = bias
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.weights_init = weights_init
         self.bias_init = bias_init
         self.border_mode = padding
@@ -644,7 +644,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.output_size = _pair(output_size) if output_size is not None else None
 
         kernel_size = _pair(kernel_size)
@@ -743,7 +743,7 @@ class FC(nn.Linear, _LayerMethod):
         self.bias_init = bias_init
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
 
         super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
 
@@ -828,7 +828,7 @@ class Activation(Module):
 
     def __init__(self, activation='relu', input_shape=None, **kwargs):
         super().__init__(input_shape)
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -913,7 +913,7 @@ class ConvNormAct(Sequential):
         self.padding = padding
         self.stride = stride
         self.dilation = dilation
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.norm_method = norm_method
         self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
                            bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
@@ -1007,7 +1007,7 @@ class FCNormAct(Sequential):
         self.out_features = out_features
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
 
         self.fc = FC(self.input_shape, out_features, bias, weights_init=weights_init, bias_init=bias_init,
                      flatten=flatten, keepdim=keepdim)
@@ -1096,7 +1096,7 @@ class ResNetBasicBlock(Module):
         self.stride = stride
         self.padding = padding
         self.dilation = _pair(dilation)
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.groups = groups
         self.weights_init = weights_init
         self.norm_method = norm_method
@@ -1275,7 +1275,7 @@ class StackingConv(Sequential):
         self.stride = stride
         self.dilation = dilation
         self.groups = groups
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.num_layers = num_layers
         self.norm_method = norm_method
 
@@ -1455,7 +1455,7 @@ class DepthwiseSepConv2D(Sequential):
         self.depth_mul = depth_mul
         self.padding = padding
         self.dilation = dilation
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.add_module('depthwise', Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, padding=padding,
                                             dilation=dilation, groups=input_shape[1], bias=bias))
         self.add_module('pointwise', Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
@@ -1508,8 +1508,8 @@ class XConv(Module):
     kwargs
         extra keyword arguments to pass to activation.
     """
-    def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul, activation='relu',
-                 dropout=None, bn=True, **kwargs):
+    def __init__(self, input_shape, feature_dim, out_channels, out_features, num_neighbors, depth_mul,
+                 activation='relu', dropout=None, bn=True, **kwargs):
         input_shape = _pointset_shape(input_shape)
 
         super().__init__(input_shape)
@@ -1518,17 +1518,17 @@ class XConv(Module):
         self.num_neighbors = num_neighbors
         self.out_features = out_features
         self.depth_mul = depth_mul
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.dropout = dropout
         self.bn = bn
 
         self.fcs = Sequential(input_shape=input_shape)
         self.fcs.add_module('fc1', FC(self.fcs.output_shape, out_features, activation=activation))
         if dropout:
-            self.fcs.add_module('dropout1', wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+            self.fcs.add_module('dropout1', wrapper(self.output_shape, nn.Dropout2d, p=dropout))
         self.fcs.add_module('fc2', FC(self.fcs.output_shape, out_features, activation=activation))
         if dropout:
-            self.fcs.add_module('dropout2', wrapper(self.output_shape, T.nn.Dropout2d, p=dropout))
+            self.fcs.add_module('dropout2', wrapper(self.output_shape, nn.Dropout2d, p=dropout))
 
         from neuralnet_pytorch.resizing import DimShuffle
         from neuralnet_pytorch.normalization import BatchNorm2d
@@ -1699,7 +1699,8 @@ class BatchGraphConv(GraphConv):
         return output
 
 
-class GraphXConv(Sequential):
+@nnt.utils.add_custom_repr
+class GraphXConv(Module):
     """
     Performs GraphX Convolution as described here_.
     **Disclaimer:** I am the first author of the paper.
@@ -1745,24 +1746,80 @@ class GraphXConv(Sequential):
         super().__init__(input_shape=input_shape)
 
         self.out_features = out_features
-        self.num_out_points = num_out_points if num_out_points else input_shape[1]
-        assert rank <= self.num_out_points // 2, 'rank should be smaller than half of num_out_points'
+        self.num_out_points = num_out_points if num_out_points else input_shape[-2]
+        if rank:
+            assert rank <= self.num_out_points // 2, 'rank should be smaller than half of num_out_points'
 
         self.rank = rank
-        self.activation = activation
+        self.activation = nnt.utils.function(activation, **kwargs)
         pattern = list(range(len(input_shape)))
         pattern[-1], pattern[-2] = pattern[-2], pattern[-1]
+        self.pattern = pattern
+        self.weights_init = weights_init
+        self.bias_init = bias_init
 
-        self.add_module('dimshuffle1', nnt.DimShuffle(pattern, input_shape=self.output_shape))
+        self.weight = nn.Parameter(T.Tensor(out_features, input_shape[-1]))
         if self.rank is None:
-            self.add_module('conv_l', FC(self.output_shape, self.num_out_points, bias=bias, activation=None,
-                                         weights_init=weights_init, bias_init=bias_init))
+            self.mixing = nn.Parameter(T.Tensor(self.num_out_points, input_shape[-2]))
         else:
-            self.add_module('conv_l1', FC(self.output_shape, self.rank, bias=False, activation=None,
-                                          weights_init=weights_init))
-            self.add_module('conv_l2', FC(self.output_shape, self.num_out_points, bias=bias, activation=None,
-                                          weights_init=weights_init, bias_init=bias_init))
+            self.mixing_u = nn.Parameter(T.Tensor(self.rank, input_shape[-2]))
+            self.mixing_v = nn.Parameter(T.Tensor(self.num_out_points, self.rank))
 
-        self.add_module('dimshuffle2', nnt.DimShuffle(pattern, input_shape=self.output_shape))
-        self.add_module('conv_r', FC(self.output_shape, out_features, bias=bias, activation=activation,
-                                     weights_init=weights_init, bias_init=bias_init, **kwargs))
+        if bias:
+            self.bias = nn.Parameter(T.Tensor(out_features))
+            self.mixing_bias = nn.Parameter(T.Tensor(self.num_out_points))
+        else:
+            self.register_parameter('bias', None)
+            self.register_parameter('mixing_bias', None)
+
+        self.reset_parameters()
+        if cuda_available:
+            self.cuda()
+
+    def forward(self, input):
+        output = utils.dimshuffle(input, self.pattern)
+        mixing = T.mm(self.mixing_v, self.mixing_u) if self.rank else self.mixing
+        output = T.matmul(output, mixing.t())
+        if self.mixing_bias is not None:
+            output = output + self.mixing_bias
+
+        output = utils.dimshuffle(output, self.pattern)
+        output = T.matmul(output, self.weight.t())
+        if self.bias is not None:
+            output = output + self.bias
+
+        return self.activation(output)
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.input_shape[:-2] + (self.num_out_points, self.out_features)
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        weights_init = partial(nn.init.kaiming_uniform_, a=np.sqrt(5)) if self.weights_init is None \
+            else self.weights_init
+
+        weights_init(self.weight)
+        if self.rank:
+            weights_init(self.mixing_u)
+            weights_init(self.mixing_v)
+        else:
+            weights_init(self.mixing)
+
+        if self.bias is not None:
+            if self.bias_init is None:
+                fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+                bound = 1 / np.sqrt(fan_in)
+                bias_init = partial(nn.init.uniform_, a=-bound, b=bound)
+            else:
+                bias_init = self.bias_init
+
+            bias_init(self.bias)
+            nn.init.zeros_(self.mixing_bias)
+
+    def extra_repr(self):
+        s = '{input_shape}, out_features={out_features}, num_out_points={num_out_points}, rank={rank}'
+        s = s.format(**self.__dict__)
+        s += ', activation={}'.format(self.activation.__name__)
+        return s

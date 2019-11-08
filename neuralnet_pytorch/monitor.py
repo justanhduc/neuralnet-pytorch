@@ -277,7 +277,7 @@ class Monitor:
                     print('No record found for \'iter\'')
 
             except FileNotFoundError:
-                print('\'log.pkl\' not found in \'%s\'' % self.current_folder)
+                print('\'log.pkl\' not found in \'%s\'' % os.path.join(self.current_folder, 'files'))
 
         else:
             self.path = os.path.join(root, model_name)
@@ -1009,7 +1009,7 @@ class Monitor:
             pkl.dump(self._dump_files, f, pkl.HIGHEST_PROTOCOL)
         return versioned_filename
 
-    def dump(self, name, obj, type='pickle', func=None, keep=-1, **kwargs):
+    def dump(self, name, obj, method='pickle', keep=-1, **kwargs):
         """
         saves the given object.
 
@@ -1017,8 +1017,10 @@ class Monitor:
             name of the file to be saved.
         :param obj:
             object to be saved.
-        :param type:
-            there are 3 types of data format.
+        :param method:
+            ``str`` or ``callable``.
+            If ``callable``, it should be a custom method to dump object.
+            There are 3 types of ``str``.
 
             ```pickle```: use :func:`pickle.dump` to store object.
 
@@ -1027,8 +1029,6 @@ class Monitor:
             ```txt```: use :func:`numpy.savetxt` to store object.
 
             Default: ```pickle```.
-        :param func:
-            custom method for dumping the given object.
         :param keep:
             the number of versions of the saved file to keep.
             Default: -1 (keeps only the latest version).
@@ -1036,27 +1036,31 @@ class Monitor:
             additional keyword arguments to the underlying save function.
         :return: ``None``.
         """
+        assert callable(method) or isinstance(method, str), 'method must be a string or callable'
+        if isinstance(method, str):
+            assert method in ('pickle', 'torch', 'txt'), 'method must be one of \'pickle\', \'torch\', or \'txt\''
 
-        self._dump(name.replace(' ', '_'), obj, keep, self._io_method[type + '_save'], func, **kwargs)
+        method = method if callable(method) else self._io_method[method + '_save']
+        self._dump(name.replace(' ', '_'), obj, keep, method, **kwargs)
 
-    def load(self, file, type='pickle', func=None, version=-1, **kwargs):
+    def load(self, file, method='pickle', version=-1, **kwargs):
         """
         loads from the given file.
 
         :param file:
             name of the saved file without version.
-        :param type:
-            there are 3 types of data format.
+        :param method:
+            ``str`` or ``callable``.
+            If ``callable``, it should be a custom method to load object.
+            There are 3 types of ``str``.
 
-            ```pickle```: use :func:`pickle.load` to store object.
+            ```pickle```: use :func:`pickle.dump` to store object.
 
-            ```torch```: use :func:`torch.load` to store object.
+            ```torch```: use :func:`torch.save` to store object.
 
-            ```txt```: use :func:`numpy.loadtxt` to store object.
+            ```txt```: use :func:`numpy.savetxt` to store object.
 
             Default: ```pickle```.
-        :param func:
-            custome method for loading the given file.
         :param version:
             the version of the saved file to load.
             Default: -1 (loads the latest version of the saved file).
@@ -1064,27 +1068,29 @@ class Monitor:
             additional keyword arguments to the underlying load function.
         :return: ``None``.
         """
+        assert callable(method) or isinstance(method, str), 'method must be a string or callable'
+        if isinstance(method, str):
+            assert method in ('pickle', 'torch', 'txt'), 'method must be one of \'pickle\', \'torch\', or \'txt\''
 
-        return self._load(file, self._io_method[type + '_load'], func, version, **kwargs)
+        method = method if callable(method) else self._io_method[method + '_load']
+        return self._load(file, method, version, **kwargs)
 
-    def _dump(self, name, obj, keep, method, custom_method, **kwargs):
+    def _dump(self, name, obj, keep, method, **kwargs):
         assert isinstance(keep, int), 'keep must be an int, got %s' % type(keep)
 
-        dump = method if custom_method is None else custom_method
         if keep < 2:
             name = os.path.join(self.current_folder, name)
-            dump(name, obj, **kwargs)
+            method(name, obj, **kwargs)
             print('Object dumped to %s' % name)
         else:
             normed_name = self._version(name, keep)
             normed_name = os.path.join(self.current_folder, normed_name)
-            dump(normed_name, obj, **kwargs)
+            method(normed_name, obj, **kwargs)
             print('Object dumped to %s' % normed_name)
 
-    def _load(self, file, method, custom_method, version=-1, **kwargs):
+    def _load(self, file, method, version=-1, **kwargs):
         assert isinstance(version, int), 'keep must be an int, got %s' % type(version)
 
-        load = method if custom_method is None else method
         full_file = os.path.join(self.current_folder, file)
         try:
             with open(os.path.join(self.current_folder, '_version.pkl'), 'rb') as f:
@@ -1093,7 +1099,7 @@ class Monitor:
             versions = self._dump_files.get(file, [])
             if len(versions) == 0:
                 try:
-                    obj = load(full_file, **kwargs)
+                    obj = method(full_file, **kwargs)
                 except FileNotFoundError:
                     print('No file named %s found' % file)
                     return None
@@ -1101,20 +1107,20 @@ class Monitor:
                 if version <= 0:
                     if len(versions) > 0:
                         latest = versions[-1]
-                        obj = load(os.path.join(self.current_folder, latest), **kwargs)
+                        obj = method(os.path.join(self.current_folder, latest), **kwargs)
                     else:
-                        return load(full_file, **kwargs)
+                        return method(full_file, **kwargs)
                 else:
                     name, ext = os.path.splitext(file)
                     file_name = os.path.normpath(name + '-%d' % version + ext)
                     if file_name in versions:
-                        obj = load(os.path.join(self.current_folder, file_name), **kwargs)
+                        obj = method(os.path.join(self.current_folder, file_name), **kwargs)
                     else:
                         print('Version %d of %s is not found in %s' % (version, file, self.current_folder))
                         return None
         except FileNotFoundError:
             try:
-                obj = load(full_file, **kwargs)
+                obj = method(full_file, **kwargs)
             except FileNotFoundError:
                 print('No file named %s found' % file)
                 return None
@@ -1178,7 +1184,7 @@ class Monitor:
             contents of the log file.
         """
 
-        with open(os.path.join(self.current_folder, log), 'rb') as f:
+        with open(os.path.join(self.current_folder, 'files', log), 'rb') as f:
             f.seek(0)
             try:
                 contents = pkl.load(f)
