@@ -676,9 +676,13 @@ def ravel_index(index, shape):
     >>> shape = (2, 3, 5)
     >>> a = T.arange(np.prod(shape)).view(*shape)
     >>> index = (1, 1, 3)
-    >>> print(a[index])  # 23
+    >>> print(a[index])
+    tensor(23.)
     >>> linear_index = nnt.utils.ravel_index(index, shape)
-    >>> print(a.flatten()[linear_index])  # 23
+    >>> print(linear_index)
+    tensor(23)
+    >>> print(a.flatten()[linear_index])
+    tensor(23.)
     """
 
     assert len(index) == len(shape), 'indices and shape must have the same length'
@@ -748,6 +752,10 @@ def block_diag(*blocks):
     If all the input arrays are square, the output is known as a
     block diagonal matrix.
 
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.block_diag_sparse`
+
     Examples
     --------
 
@@ -758,16 +766,16 @@ def block_diag(*blocks):
     ...               [6, 7, 8]])
     >>> C = T.tensor([[7]])
     >>> block_diag(A, B, C)
-    [[1 0 0 0 0 0]
-     [0 1 0 0 0 0]
-     [0 0 3 4 5 0]
-     [0 0 6 7 8 0]
-     [0 0 0 0 0 7]]
+    tensor([[1 0 0 0 0 0]
+            [0 1 0 0 0 0]
+            [0 0 3 4 5 0]
+            [0 0 6 7 8 0]
+            [0 0 0 0 0 7]])
     >>> block_diag(T.tensor([1.0]), T.tensor([2, 3]), T.tensor([[4, 5], [6, 7]]))
-    array([[ 1.,  0.,  0.,  0.,  0.],
-           [ 0.,  2.,  3.,  0.,  0.],
-           [ 0.,  0.,  0.,  4.,  5.],
-           [ 0.,  0.,  0.,  6.,  7.]])
+    tensor([[ 1.,  0.,  0.,  0.,  0.],
+            [ 0.,  2.,  3.,  0.,  0.],
+            [ 0.,  0.,  0.,  4.,  5.],
+            [ 0.,  0.,  0.,  6.,  7.]])
     """
 
     assert all(a.ndimension() >= 2 for a in blocks), 'All tensors must be at least of rank 2'
@@ -781,6 +789,80 @@ def block_diag(*blocks):
         r = r + rr
         c = c + cc
     return out
+
+
+def block_diag_sparse(a : T.Tensor, dense=False):
+    """
+    Creates a sparse block diagonal matrix from the provided array.
+    Given the input tensor of size ``(n, r, c)``, the output will have
+    the matrices of the last two indices arranged on the diagonal::
+
+        [[a[0], 0, 0],
+         [0, a[1], 0],
+         [0, 0, a[2]]]
+
+    :param a:
+        a tensor of size ``(n, r, c)``.
+    :param dnese:
+        whether to return a dense matrix.
+        Default: ``False``.
+    :return:
+        a tensor with `a[0]`, `a[1]`, `a[2]`, ... on the diagonal.
+        Has the same dtype as `a`.
+
+    Notes
+    -----
+    This function is for square matrices only. For general cases,
+    use :func:`~neuralnet_pytorch.utils.block_diag`.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.block_diag`
+
+    Examples
+    --------
+
+    >>> from neuralnet_pytorch.utils import block_diag_sparse
+    >>> import numpy as np
+    >>> a = T.arange(3 * 2 * 4).view(3, 2, 4)
+    >>> block_diag_sparse(a)
+    tensor(indices=tensor([[ 0,  0,  0,  0,  1,  1,  1,  1,  2,  2,  2,  2,  3,  3,
+                             3,  3,  4,  4,  4,  4,  5,  5,  5,  5],
+                           [ 0,  1,  2,  3,  0,  1,  2,  3,  4,  5,  6,  7,  4,  5,
+                             6,  7,  8,  9, 10, 11,  8,  9, 10, 11]]),
+           values=tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13,
+                          14, 15, 16, 17, 18, 19, 20, 21, 22, 23]),
+           size=(6, 12), nnz=24, layout=torch.sparse_coo)
+    >>> block_diag_sparse(a, dense=True)
+    tensor([[ 0,  1,  2,  3,  0,  0,  0,  0,  0,  0,  0,  0],
+            [ 4,  5,  6,  7,  0,  0,  0,  0,  0,  0,  0,  0],
+            [ 0,  0,  0,  0,  8,  9, 10, 11,  0,  0,  0,  0],
+            [ 0,  0,  0,  0, 12, 13, 14, 15,  0,  0,  0,  0],
+            [ 0,  0,  0,  0,  0,  0,  0,  0, 16, 17, 18, 19],
+            [ 0,  0,  0,  0,  0,  0,  0,  0, 20, 21, 22, 23]])
+    """
+    assert len(a.shape) == 3, \
+        'Input tensor must have 3 dimensions with the last two being matrices, got %d'.format(len(a.shape))
+
+    n, r, c = a.shape
+    y = T.arange(r)
+    x = T.arange(c)
+    yy, xx = T.meshgrid(y, x)
+
+    xxs = T.stack([xx] * n)
+    yys = T.stack([yy] * n)
+    transl_x = T.arange(n) * c
+    transl_y = T.arange(n) * r
+    xxs_transl = xxs + transl_x[..., None, None]
+    yys_transl = yys + transl_y[..., None, None]
+
+    x_flat = xxs_transl.flatten()
+    y_flat = yys_transl.flatten()
+    indices = T.stack((y_flat, x_flat))
+
+    a_sp = T.sparse_coo_tensor(indices.long(), a.flatten(),
+                               size=T.Size((n * r, n * c)), dtype=a.dtype)
+    return a_sp.to_dense() if dense else a_sp
 
 
 def smooth(x, beta=.9, window='hanning'):
@@ -839,7 +921,7 @@ def smooth(x, beta=.9, window='hanning'):
     return y if y.shape[0] == x.shape[0] else y[(window_len // 2 - 1):-(window_len // 2)]
 
 
-def get_bilinear_weights(x, y, h, w, border_mode='nearest'):
+def get_bilinear_weights(x: T.Tensor, y: T.Tensor, h: int, w: int, border_mode='nearest'):
     """
     Returns bilinear weights used in bilinear interpolation.
 
@@ -892,7 +974,7 @@ def get_bilinear_weights(x, y, h, w, border_mode='nearest'):
     return wxy, wx1y, w1xy, w1x1y, x0, x1, y0, y1
 
 
-def interpolate_bilinear(im, x, y, output_shape=None, border_mode='nearest'):
+def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=None, border_mode='nearest'):
     """
     Returns a batch of interpolated images. Used for Spatial Transformer Network.
     Works like `torch.grid_sample`.
@@ -1125,5 +1207,5 @@ def function(activation, **kwargs):
         activation function
     """
 
-    func = partial(act[activation], **kwargs)
-    return update_wrapper(func, act[activation])
+    func = partial(activation, **kwargs) if callable(activation) else partial(act[activation], **kwargs)
+    return update_wrapper(func, activation) if callable(activation) else update_wrapper(func, act[activation])

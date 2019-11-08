@@ -55,7 +55,7 @@ class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
             input_shape)
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.no_scale = no_scale
 
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
@@ -121,7 +121,7 @@ class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
             input_shape)
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.no_scale = no_scale
 
         super().__init__(self.input_shape[1], eps, momentum, affine, track_running_stats)
@@ -178,7 +178,7 @@ class LayerNorm(nn.LayerNorm, _LayerMethod):
             input_shape)
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
         self.input_shape = _matrix_shape(input_shape)
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         super().__init__(input_shape[1:], eps, elementwise_affine)
 
         if cuda_available:
@@ -230,7 +230,7 @@ class InstanceNorm1d(nn.InstanceNorm1d, _LayerMethod):
             input_shape)
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         super().__init__(input_shape[-1], eps, momentum, affine, track_running_stats)
 
         if cuda_available:
@@ -283,7 +283,7 @@ class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
             input_shape)
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
 
         if cuda_available:
@@ -325,7 +325,7 @@ class GroupNorm(nn.GroupNorm, _LayerMethod):
         assert input_shape[1] is not None, 'Dimension at index 1 (index starts at 0) must be specified'
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         super().__init__(num_groups, input_shape[1], eps, affine)
 
         if cuda_available:
@@ -466,7 +466,7 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
             input_shape)
 
         self.input_shape = input_shape
-        self.activation = activation if callable(activation) else nnt.function(activation, **kwargs)
+        self.activation = nnt.function(activation, **kwargs)
         self.no_scale = no_scale
 
         super().__init__(input_shape[-1], eps, momentum, affine, track_running_stats)
