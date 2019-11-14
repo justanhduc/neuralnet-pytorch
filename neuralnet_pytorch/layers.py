@@ -1716,7 +1716,7 @@ class GraphXConv(Module):
         If an integer is passed, it is treated as the size of each input sample.
     out_features : int
         size of each output sample.
-    num_out_points : int
+    out_instances : int
         resolution of the output point clouds.
         If not specified, output will have the same resolution as input.
         Default: ``None``.
@@ -1740,15 +1740,15 @@ class GraphXConv(Module):
         extra keyword arguments to pass to activation.
     """
 
-    def __init__(self, input_shape, out_features, num_out_points=None, rank=None, bias=True, activation=None,
+    def __init__(self, input_shape, out_features, out_instances=None, rank=None, bias=True, activation=None,
                  weights_init=None, bias_init=None, **kwargs):
         input_shape = _pointset_shape(input_shape)
         super().__init__(input_shape=input_shape)
 
         self.out_features = out_features
-        self.num_out_points = num_out_points if num_out_points else input_shape[-2]
+        self.out_instances = out_instances if out_instances else input_shape[-2]
         if rank:
-            assert rank <= self.num_out_points // 2, 'rank should be smaller than half of num_out_points'
+            assert rank <= self.out_instances // 2, 'rank should be smaller than half of num_out_points'
 
         self.rank = rank
         self.activation = nnt.utils.function(activation, **kwargs)
@@ -1760,14 +1760,14 @@ class GraphXConv(Module):
 
         self.weight = nn.Parameter(T.Tensor(out_features, input_shape[-1]))
         if self.rank is None:
-            self.mixing = nn.Parameter(T.Tensor(self.num_out_points, input_shape[-2]))
+            self.mixing = nn.Parameter(T.Tensor(self.out_instances, input_shape[-2]))
         else:
             self.mixing_u = nn.Parameter(T.Tensor(self.rank, input_shape[-2]))
-            self.mixing_v = nn.Parameter(T.Tensor(self.num_out_points, self.rank))
+            self.mixing_v = nn.Parameter(T.Tensor(self.out_instances, self.rank))
 
         if bias:
             self.bias = nn.Parameter(T.Tensor(out_features))
-            self.mixing_bias = nn.Parameter(T.Tensor(self.num_out_points))
+            self.mixing_bias = nn.Parameter(T.Tensor(self.out_instances))
         else:
             self.register_parameter('bias', None)
             self.register_parameter('mixing_bias', None)
@@ -1793,7 +1793,7 @@ class GraphXConv(Module):
     @property
     @utils.validate
     def output_shape(self):
-        return self.input_shape[:-2] + (self.num_out_points, self.out_features)
+        return self.input_shape[:-2] + (self.out_instances, self.out_features)
 
     def reset_parameters(self):
         super().reset_parameters()
@@ -1819,7 +1819,7 @@ class GraphXConv(Module):
             nn.init.zeros_(self.mixing_bias)
 
     def extra_repr(self):
-        s = '{input_shape}, out_features={out_features}, num_out_points={num_out_points}, rank={rank}'
+        s = '{input_shape}, out_features={out_features}, out_instances={out_instances}, rank={rank}'
         s = s.format(**self.__dict__)
         s += ', activation={}'.format(self.activation.__name__)
         return s

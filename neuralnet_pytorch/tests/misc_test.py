@@ -55,23 +55,26 @@ def test_monitor():
     a = T.rand(*shape)
     if cuda_available:
         a = a.cuda()
-    n_loops = 5
 
-    mon = nnt.Monitor(use_tensorboard=True)
+    n_epochs = 5
+    n_iters = 10
+    print_freq = 5
+
+    mon = nnt.Monitor(use_tensorboard=True, print_freq=print_freq)
     mon.dump('foo.pkl', a)
     loaded = mon.load('foo.pkl')
     testing.assert_allclose(a, loaded)
     mon.reset()
 
-    for i in range(n_loops):
-        with mon:
-            mon.dump('foo.pkl', a + i, keep=3)
-            mon.plot('parabol', i ** 2)
-            mon.hist('histogram', a)
+    for epoch in mon.iter_epoch(range(n_epochs)):
+        for it in mon.iter_batch(range(n_iters)):
+            mon.dump('foo.pkl', a + it, keep=3)
+            mon.plot('parabol1', (it + epoch) ** 2)
+            mon.hist('histogram1', a + (it * epoch))
             mon.imwrite('image', a[None, None])
 
-    loaded = mon.load('foo.pkl', version=2)
-    testing.assert_allclose(a + 2., loaded)
+    loaded = mon.load('foo.pkl', version=48)
+    testing.assert_allclose(a + 8., loaded)
     mon.reset()
 
     mon.dump('foo.txt', nnt.utils.to_numpy(a), 'txt')
@@ -81,13 +84,15 @@ def test_monitor():
     testing.assert_allclose(a, loaded)
     mon.reset()
 
-    for i in range(n_loops):
-        with mon:
-            mon.dump('foo.txt', nnt.utils.to_numpy(a + i), 'txt', keep=3)
-    loaded = mon.load('foo.txt', 'txt', version=2, dtype='float32')
+    for epoch in mon.iter_epoch(range(n_epochs)):
+        for it in mon.iter_batch(range(n_iters)):
+            mon.plot('parabol2', (it + epoch) ** 2)
+            mon.hist('histogram2', a + (it * epoch))
+            mon.dump('foo.txt', nnt.utils.to_numpy(a + it), 'txt', keep=3)
+    loaded = mon.load('foo.txt', 'txt', version=48, dtype='float32')
     if cuda_available:
         loaded = nnt.utils.to_cuda(loaded)
-    testing.assert_allclose(a + 2., loaded)
+    testing.assert_allclose(a + 8., loaded)
     mon.reset()
 
     mon.dump('foo.pt', {'a': a}, 'torch')
@@ -95,9 +100,11 @@ def test_monitor():
     testing.assert_allclose(a, loaded)
     mon.reset()
 
-    for i in range(n_loops):
-        with mon:
-            mon.dump('foo.pt', {'a': a + i}, 'torch', keep=4)
-    loaded = mon.load('foo.pt', 'torch', version=3)['a']
-    testing.assert_allclose(a + 3, loaded)
+    for epoch in mon.iter_epoch(range(n_epochs)):
+        for it in mon.iter_batch(range(n_iters)):
+            mon.plot('parabol3', (it + epoch) ** 2)
+            mon.hist('histogram3', a + (it * epoch))
+            mon.dump('foo.pt', {'a': a + it}, 'torch', keep=4)
+    loaded = mon.load('foo.pt', 'torch', version=49)['a']
+    testing.assert_allclose(a + 9, loaded)
     mon.reset()

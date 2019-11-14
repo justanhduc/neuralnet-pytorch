@@ -172,13 +172,12 @@ class Monitor:
         import neuralnet as nnt
 
         ...
-        mon = nnt.Monitor(model_name='my_model', print_freq=100)
-        for epoch in n_epochs:
-            for data in data_loader:
-                with mon:
-                    loss = net(data)
-                    mon.plot('training loss', loss)
-                    mon.imwrite('input images', data['images'])
+        mon = nnt.Monitor(print_freq=100)
+        for epoch in mon.iter_epoch(range(n_epochs)):
+            for data in mon.iter_batch(data_loader):
+                loss = net(data)
+                mon.plot('training loss', loss)
+                mon.imwrite('input images', data['images'])
         ...
 
     Parameters
@@ -190,10 +189,12 @@ class Monitor:
     current_folder : str
         if given, all the stats in here will be overwritten or resumed.
     print_freq : int
-        statistics display frequency. Used only in context manager mode.
+        statistics display frequency.
+        Unit is iteration.
     num_iters : int
         number of iterations/epoch.
         If specified, training iteration percentage will be displayed along with epoch.
+        Otherwise, it will be automatically calculated after the first epoch.
     use_visdom : bool
         whether to use Visdom for real-time monitoring.
     use_tensorboard : bool
@@ -230,10 +231,10 @@ class Monitor:
         self._last_epoch = 0
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._points_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
         self._schedule = {'beginning': collections.defaultdict(_spawn_defaultdict_ordereddict),
@@ -242,37 +243,46 @@ class Monitor:
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
+        self._prefix = kwargs.pop('prefix', 'run')
+        self._num_iters = num_iters
 
         self.print_freq = print_freq
+        self.num_iters = num_iters
         if current_folder:
             self.current_folder = current_folder
             try:
                 log = self.read_log('log.pkl')
                 try:
-                    self._set_num_stats(log['num'])
+                    self.num_stats = log['num']
                 except KeyError:
                     print('No record found for \'num\'')
 
                 try:
-                    self._set_hist_stats(log['hist'])
+                    self.hist_stats = log['hist']
                 except KeyError:
                     print('No record found for \'hist\'')
 
                 try:
-                    self._set_options(log['options'])
+                    self.options = log['options']
                 except KeyError:
                     print('No record found for \'options\'')
 
+                if self.num_iters is None:
+                    try:
+                        self.num_iters = log['num_iters']
+                    except KeyError:
+                        print('No record found for \'num_iters\'')
+
                 try:
-                    self._last_epoch = log['epoch']
+                    self.epoch = log['epoch']
                 except KeyError:
-                    if num_iters:
-                        self._last_epoch = log['iter'] // num_iters
+                    if self.num_iters:
+                        self.epoch = log['iter'] // self.num_iters
                     else:
                         print('No record found for \'epoch\'')
 
                 try:
-                    self.set_iter(self._last_epoch * num_iters if num_iters else log['iter'])
+                    self.iter = self.epoch * self.num_iters if self.num_iters else log['iter']
                 except KeyError:
                     print('No record found for \'iter\'')
 
@@ -282,13 +292,8 @@ class Monitor:
         else:
             self.path = os.path.join(root, model_name)
             os.makedirs(self.path, exist_ok=True)
-            subfolders = os.listdir(self.path)
-            self.current_folder = os.path.join(self.path, 'run%d' % (len(subfolders) + 1))
-            idx = 1
-            while os.path.exists(self.current_folder):
-                self.current_folder = os.path.join(self.path, 'run%d' % (len(subfolders) + 1 + idx))
-                idx += 1
-            os.makedirs(self.current_folder, exist_ok=True)
+            self.current_folder = self._get_new_folder()
+            os.mkdir(self.current_folder)
 
         self.use_visdom = use_visdom
         if use_visdom:
@@ -315,7 +320,6 @@ class Monitor:
         self._thread = threading.Thread(target=self._work, daemon=True)
         self._thread.start()
 
-        self.num_iters = num_iters
         self.send_slack = send_slack
         if send_slack:
             assert kwargs.get('channel', None) is not None and kwargs.get('token', None) is not None, \
@@ -343,12 +347,87 @@ class Monitor:
         atexit.register(self._atexit)
         print('Result folder: %s' % self.current_folder)
 
+    def _get_new_folder(self):
+        runs = [folder for folder in os.listdir(self.path) if folder.startswith(self._prefix)]
+        if not runs:
+            idx = 1
+        else:
+            indices = sorted([int(r[len(self._prefix):]) for r in runs])
+            idx = indices[-1] + 1
+
+        return os.path.join(self.path, '{}{}'.format(self._prefix, idx))
+
+    def iter_epoch(self, iterator):
+        """
+        tracks training epoch and returns the item in `iterator`.
+
+        :param iterator:
+            the epoch iterator.
+            For e.g., ``range(num_epochs)``.
+        :return:
+            a generator over `iterator`.
+
+        Examples
+        --------
+
+        >>> num_epochs = 10
+        >>> mon = Monitor(print_freq=1000)
+        >>> for epoch in mon.iter_epoch(range(num_epochs))
+        ...     # do something here
+
+        See Also
+        --------
+        :meth:`~iter_batch`
+        """
+
+        for item in iterator:
+            if self.epoch > 0 and self.num_iters is None:
+                self.num_iters = self.iter // self.epoch
+
+            yield item
+            self.epoch += 1
+
+    def iter_batch(self, iterator):
+        """
+        tracks training iteration and returns the item in `iterator`.
+
+        :param iterator:
+            the batch iterator.
+            For e.g., ``enumerator(loader)``.
+        :return:
+            a generator over `iterator`.
+
+        Examples
+        --------
+
+        >>> dataset = ...
+        >>> data_loader = ...
+        >>> num_epochs = 10
+        >>> mon = Monitor(print_freq=1000)
+        >>> for epoch in mon.iter_epoch(range(num_epochs)):
+        ...     for data in mon.iter_batch(enumerate(data_loader)):
+        ...         # do something here
+
+        See Also
+        --------
+        :meth:`~iter_epoch`
+        """
+
+        for item in iterator:
+            yield item
+            if self.print_freq:
+                if self.iter % self.print_freq == 0:
+                    self.flush()
+
+            self.iter += 1
+
+    @utils.deprecated(iter_batch, '1.2.0')
     def __enter__(self):
         pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.print_freq:
-            if self._iter % self.print_freq == 0:
+            if self.iter % self.print_freq == 0:
                 self.flush()
         self.tick()
 
@@ -357,23 +436,38 @@ class Monitor:
         """
         returns the current iteration.
 
-        :return: :attr:`~_iter`.
+        :return:
+            :attr:`~_iter`.
         """
 
         return self._iter
 
-    def set_iter(self, iter_num):
+    @iter.setter
+    def iter(self, iter):
         """
         sets the iteration counter to a specific value.
 
-        :param iter_num:
+        :param iter:
             the iteration number to set.
-        :return: ``None``.
+        :return:
+            ``None``.
+        """
+        assert iter >= 0, 'Iteration must be non-negative'
+        self._iter = int(iter)
+
+    @property
+    def epoch(self):
+        """
+        returns the current epoch.
+
+        :return:
+            :attr:`~_last_epoch`.
         """
 
-        self._iter = iter_num
+        return self._last_epoch
 
-    def set_epoch(self, epoch):
+    @epoch.setter
+    def epoch(self, epoch):
         """
         sets the epoch for logging and keeping training status.
         Should start from 0.
@@ -384,16 +478,80 @@ class Monitor:
             ``None``.
         """
 
-        self._last_epoch = epoch
+        assert epoch >= 0, 'Epoch must be non-negative'
+        self._last_epoch = int(epoch)
 
-    def _set_num_stats(self, stats_dict):
+    @property
+    def num_stats(self):
+        """
+        returns the collected scalar statistics from beginning.
+
+        :return:
+            :attr:`~_num_since_beginning`.
+        """
+
+        return dict(self._num_since_beginning)
+
+    @num_stats.setter
+    def num_stats(self, stats_dict):
         self._num_since_beginning.update(stats_dict)
 
-    def _set_hist_stats(self, stats_dict):
+    @num_stats.deleter
+    def num_stats(self):
+        self._num_since_beginning.clear()
+
+    def clear_num_stats(self, key):
+        """
+        removes the collected statistics for scalar plot of the specified `key`.
+
+        :param key:
+            the name of the scalar collection.
+        :return: ``None``.
+        """
+
+        self._num_since_beginning[key].clear()
+
+    @property
+    def hist_stats(self):
+        """
+        returns the collected tensors from beginning.
+
+        :return:
+            :attr:`~_hist_since_beginning`.
+        """
+
+        return dict(self._hist_since_beginning)
+
+    @hist_stats.setter
+    def hist_stats(self, stats_dict):
         self._hist_since_beginning.update(stats_dict)
 
-    def _set_options(self, options_dict):
+    @hist_stats.deleter
+    def hist_stats(self):
+        self._hist_since_beginning.clear()
+
+    def clear_hist_stats(self, key):
+        """
+        removes the collected statistics for histogram plot of the specified `key`.
+
+        :param key:
+            the name of the histogram collection.
+        :return: ``None``.
+        """
+
+        self._hist_since_beginning[key].clear()
+
+    @property
+    def options(self):
+        return self._options
+
+    @options.setter
+    def options(self, options_dict):
         self._options.update(options_dict)
+
+    @options.deleter
+    def options(self):
+        self._options.clear()
 
     def set_option(self, name, option, value):
         """
@@ -416,38 +574,39 @@ class Monitor:
 
         self._options[name][option] = value
 
-    def clear_scalar_stats(self, key):
-        """
-        removes the collected statistics for scalar plot of the specified `key`.
-
-        :param key:
-            the name of the scalar collection.
-        :return: ``None``.
-        """
-
-        self._num_since_beginning[key].clear()
-
-    def clear_hist_stats(self, key):
-        """
-        removes the collected statistics for histogram plot of the specified `key`.
-
-        :param key:
-            the name of the histogram collection.
-        :return: ``None``.
-        """
-
-        self._hist_since_beginning[key].clear()
-
-    def get_epoch(self):
-        """
-        returns the current epoch.
-        """
-        return self._last_epoch
-
     def run_training(self, net, optim, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
                      train_stats_func=None, val_stats_func=None, *args, **kwargs):
         """
         runs the training loop for the given neural network.
+
+        :param net:
+            must be an instance of :class:`~neuralnet_pytorch.layers.Net`
+            and :class:`~neuralnet_pytorch.layers.Module`.
+        :param train_loader:
+            provides training data for neural net.
+        :param n_epochs:
+            number of training epochs.
+        :param eval_loader:
+            provides validation data for neural net. Optional.
+        :param valid_freq:
+            indicates how often validation is run.
+            In effect if only `eval_loader` is given.
+        :param start_epoch:
+            the epoch from which training will continue.
+            If ``None``, training counter will be set to 0.
+        :param train_stats_func:
+            a custom function to handle statistics returned from the training procedure.
+            If ``None``, a default handler will be used.
+            For a list of supported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param val_stats_func:
+            a custom function to handle statistics returned from the validation procedure.
+            If ``None``, a default handler will be used.
+            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param args:
+            additional arguments that will be passed to neural net.
+        :param kwargs:
+            additional keyword arguments that will be passed to neural net.
+        :return: ``None``.
 
         Examples
         --------
@@ -489,35 +648,6 @@ class Monitor:
             # run the training loop
             mon.run_training(net, train_loader, n_epochs, eval_loader, valid_freq=val_freq)
             print('Training finished!')
-
-        :param net:
-            must be an instance of :class:`~neuralnet_pytorch.layers.Net`
-            and :class:`~neuralnet_pytorch.layers.Module`.
-        :param train_loader:
-            provides training data for neural net.
-        :param n_epochs:
-            number of training epochs.
-        :param eval_loader:
-            provides validation data for neural net. Optional.
-        :param valid_freq:
-            indicates how often validation is run.
-            In effect if only `eval_loader` is given.
-        :param start_epoch:
-            the epoch from which training will continue.
-            If ``None``, training counter will be set to 0.
-        :param train_stats_func:
-            a custom function to handle statistics returned from the training procedure.
-            If ``None``, a default handler will be used.
-            For a list of supported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
-        :param val_stats_func:
-            a custom function to handle statistics returned from the validation procedure.
-            If ``None``, a default handler will be used.
-            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
-        :param args:
-            additional arguments that will be passed to neural net.
-        :param kwargs:
-            additional keyword arguments that will be passed to neural net.
-        :return: ``None``.
         """
 
         assert isinstance(net, nnt.Net), 'net must be an instance of Net'
@@ -531,9 +661,9 @@ class Monitor:
             'pointclouds': self.scatter
         }
 
-        start_epoch = self._last_epoch if start_epoch is None else start_epoch
+        start_epoch = self.epoch if start_epoch is None else start_epoch
         for epoch in range(start_epoch, n_epochs):
-            self._last_epoch = epoch
+            self.epoch = epoch
             if optim['scheduler'] is not None:
                 optim['scheduler'].step(epoch)
 
@@ -558,7 +688,7 @@ class Monitor:
                         train_stats_func(net.stats['train'], it)
 
                     if valid_freq:
-                        if self._iter % valid_freq == 0:
+                        if self.iter % valid_freq == 0:
                             net.eval()
 
                             with T.set_grad_enabled(False):
@@ -668,7 +798,7 @@ class Monitor:
 
         :return: ``None``.
         """
-        self._iter += 1
+        self.iter += 1
 
     def plot(self, name: str, value):
         """
@@ -685,9 +815,9 @@ class Monitor:
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
-        self._num_since_last_flush[name][self._iter] = value
+        self._num_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
-            self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self._iter)
+            self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self.iter)
 
     def scatter(self, name: str, value, latest=False):
         """
@@ -703,13 +833,13 @@ class Monitor:
         :return: ``None``.
         """
 
-        if self._iter == 0:
+        if self.iter == 0:
             self._options[name]['last_only'] = latest
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
-        self._pointcloud_since_last_flush[name][self._iter] = value
+        self._points_since_last_flush[name][self.iter] = value
 
     def imwrite(self, name: str, value, latest=False):
         """
@@ -729,16 +859,16 @@ class Monitor:
         :return: ``None``.
         """
 
-        if self._iter == 0:
+        if self.iter == 0:
             self._options[name]['last_only'] = latest
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
-        self._img_since_last_flush[name][self._iter] = value
+        self._img_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
             for idx, img in enumerate(value):
-                self.writer.add_image('image/' + name.replace(' ', '-') + '-%d' % idx, img, self._iter)
+                self.writer.add_image('image/' + name.replace(' ', '-') + '-%d' % idx, img, self.iter)
 
     def hist(self, name, value, n_bins=20, latest=False):
         """
@@ -759,13 +889,13 @@ class Monitor:
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
-        if self._iter == 0:
+        if self.iter == 0:
             self._options[name]['last_only'] = latest
             self._options[name]['n_bins'] = n_bins
 
-        self._hist_since_last_flush[name][self._iter] = value
+        self._hist_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
-            self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self._iter)
+            self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self.iter)
 
     def schedule(self, func, beginning=True, *args, **kwargs):
         """
@@ -789,7 +919,7 @@ class Monitor:
         self._schedule[when][name]['args'] = args
         self._schedule[when][name]['kwargs'] = kwargs
 
-    def _worker(self, it, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
+    def _worker(self, it, epoch, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
                 _pointcloud_since_last_flush):
         prints = []
 
@@ -878,22 +1008,20 @@ class Monitor:
         for name, val in list(_hist_since_last_flush.items()):
             if self.use_tensorboard:
                 k = max(list(_hist_since_last_flush[name].keys()))
-                val = np.array(val[k]).flatten()
-                self.writer.add_histogram(name, val, global_step=k)
+                self.writer.add_histogram(name, np.array(val[k]).flatten(), global_step=k)
 
-            n_bins = self._options[name].get('n_bins')
-            latest = self._options[name].get('last_only')
+            n_bins = self._options[name].get('n_bins', 20)
+            latest = self._options[name].get('last_only', False)
 
             if latest:
                 k = max(list(_hist_since_last_flush[name].keys()))
-                val = np.array(val[k]).flatten()
-                plt.hist(val, bins='auto')
+                plt.hist(np.array(val[k]).flatten(), bins='auto')
             else:
                 self._hist_since_beginning[name].update(val)
 
-                z_vals = list(self._hist_since_beginning[name].keys())
-                val = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
-                hists = [np.histogram(val, bins=n_bins) for val in val]
+                z_vals = np.array(list(self._hist_since_beginning[name].keys()))
+                vals = [np.array(self._hist_since_beginning[name][i]).flatten() for i in z_vals]
+                hists = [np.histogram(v, bins=n_bins) for v in vals]
                 y_vals = np.array([hists[i][0] for i in range(len(hists))])
                 x_vals = np.array([hists[i][1] for i in range(len(hists))])
                 x_vals = (x_vals[:, :-1] + x_vals[:, 1:]) / 2.
@@ -940,7 +1068,7 @@ class Monitor:
         plt.close('all')
 
         with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'epoch': self._last_epoch,
+            pkl.dump({'iter': it, 'epoch': epoch, 'num_iters': self.num_iters,
                       'num': dict(self._num_since_beginning),
                       'hist': dict(self._hist_since_beginning),
                       'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
@@ -948,8 +1076,8 @@ class Monitor:
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
                                                                 (it % self.num_iters) / self.num_iters * 100.,
-                                                                it // self.num_iters + 1) if self.num_iters \
-            else 'Iteration {}'.format(it)
+                                                                epoch + 1) if self.num_iters \
+            else 'Iteration {} Epoch {}'.format(it, epoch)
 
         elapsed_time = time.time() - self._timer
         time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
@@ -979,16 +1107,17 @@ class Monitor:
         :return: ``None``.
         """
 
-        self._q.put((self._worker, self._iter, dict(self._num_since_last_flush), dict(self._img_since_last_flush),
-                     dict(self._hist_since_last_flush), dict(self._pointcloud_since_last_flush)))
+        self._q.put((self._worker, self.iter, self.epoch, dict(self._num_since_last_flush),
+                     dict(self._img_since_last_flush), dict(self._hist_since_last_flush),
+                     dict(self._points_since_last_flush)))
         self._num_since_last_flush.clear()
         self._img_since_last_flush.clear()
         self._hist_since_last_flush.clear()
-        self._pointcloud_since_last_flush.clear()
+        self._points_since_last_flush.clear()
 
     def _version(self, file, keep):
         name, ext = os.path.splitext(file)
-        versioned_filename = os.path.normpath(name + '-%d' % self._iter + ext)
+        versioned_filename = os.path.normpath(name + '-%d' % self.iter + ext)
 
         if file not in self._dump_files.keys():
             self._dump_files[file] = []
@@ -1162,16 +1291,17 @@ class Monitor:
         :return: ``None``.
         """
 
-        self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        del self.num_stats
+        del self.hist_stats
+        del self.options
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._pointcloud_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
-        self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._points_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
         self._iter = 0
         self._last_epoch = 0
+        self.num_iters = self._num_iters
         self._timer = time.time()
 
     def read_log(self, log):
