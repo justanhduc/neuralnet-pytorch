@@ -33,15 +33,12 @@ def first_derivative_loss(x, y, p=2):
 
     if x.ndimension() != 4 and y.ndimension() != 4:
         raise TypeError('y and y_pred should have four dimensions')
+
     kern_x = T.from_numpy(np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]], dtype='float32')).requires_grad_(False)
-    kern_x = T.flip(kern_x.expand(y.shape[1], y.shape[1], 3, 3), (0, 1))
+    kern_x = T.flip(kern_x.expand(y.shape[1], y.shape[1], 3, 3), (0, 1)).to(x.device)
 
     kern_y = T.from_numpy(np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]], dtype='float32')).requires_grad_(False)
-    kern_y = T.flip(kern_y.expand(y.shape[1], y.shape[1], 3, 3), (0, 1))
-
-    if utils.cuda_available:
-        kern_x = kern_x.cuda()
-        kern_y = kern_y.cuda()
+    kern_y = T.flip(kern_y.expand(y.shape[1], y.shape[1], 3, 3), (0, 1)).to(x.device)
 
     x_grad_x = F.conv2d(x, kern_x, padding=1)
     x_grad_y = F.conv2d(x, kern_y, padding=1)
@@ -166,10 +163,8 @@ def ssim(img1, img2, max_val=1., filter_size=11, filter_sigma=1.5, k1=0.01, k2=0
     sigma = (size * filter_sigma / filter_size) if filter_size else 1.
 
     if filter_size:
-        window = T.flip(T.tensor(_fspecial_gauss(size, sigma)), (0, 1)).view(1, 1, size, size).type(
-            T.float32).requires_grad_(False)
-        if utils.cuda_available:
-            window = window.cuda()
+        window = T.flip(T.tensor(_fspecial_gauss(size, sigma)), (0, 1)).view(1, 1, size, size)\
+            .requires_grad_(False).to(device=img1.device, dtype=img1.dtype)
 
         mu1 = F.conv2d(img1, window)
         mu2 = F.conv2d(img2, window)

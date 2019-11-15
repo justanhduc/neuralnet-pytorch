@@ -183,14 +183,13 @@ def threadsafe_generator(generator):
     return safe_generator
 
 
-class DataLoader(metaclass=abc.ABCMeta):
+class DataLoader:
     """
     A lightweight data loader. Works comparably to
     Pytorch's :class:`torch.utils.data.Dataloader`
-    when the workload is light, but it
-    initializes much faster.
+    when the workload is light, but it initializes much faster.
     It is totally compatible with :class:`torch.utils.data.Dataset`
-    and can be a drop-in for :class:`torch.utils.data.Dataloader`.
+    and can be an alternative for :class:`torch.utils.data.Dataloader`.
 
     Parameters
     ----------
@@ -597,6 +596,7 @@ def dimshuffle(x, pattern):
     --------
     :func:`~neuralnet_pytorch.utils.shape_padleft`
     :func:`~neuralnet_pytorch.utils.shape_padright`
+    :func:`~neuralnet_pytorch.utils.swapaxes`
     """
 
     assert isinstance(pattern, (list, tuple)), 'pattern must be a list/tuple'
@@ -626,6 +626,7 @@ def shape_padleft(x, n_ones=1):
     --------
     :func:`~neuralnet_pytorch.utils.dimshuffle`
     :func:`~neuralnet_pytorch.utils.shape_padright`
+    :func:`~neuralnet_pytorch.utils.swapaxes`
     """
 
     pattern = ('x',) * n_ones + tuple(range(x.ndimension()))
@@ -649,21 +650,55 @@ def shape_padright(x, n_ones=1):
     --------
     :func:`~neuralnet_pytorch.utils.dimshuffle`
     :func:`~neuralnet_pytorch.utils.shape_padleft`
+    :func:`~neuralnet_pytorch.utils.swapaxes`
     """
 
     pattern = tuple(range(x.ndimension())) + ('x',) * n_ones
     return dimshuffle(x, pattern)
 
 
-def ravel_index(index, shape):
+def swapaxes(y, axis1, axis2):
+    """
+    Swaps two given axes in the input tensor.
+    If the input is of shape :math:`(n_1, n_2, ..., n_{axis1}, ..., n_{axis2}, ...)`,
+    the output will be :math:`(n_1, n_2, ..., n_{axis2}, ..., n_{axis1}, ...)`.
+    Can be seen as a generalization of transpose.
+    Taken from `Theano's swapaxes`_.
+
+    .. _Theano's swapaxes:
+        http://deeplearning.net/software/theano/library/tensor/basic.html#theano.tensor._tensor_py_operators.swapaxes
+
+    :param y:
+        a tensor.
+    :param axis1:
+        an axis to be swapped.
+    :param axis2:
+        another axis to be swapped.
+    :return:
+        the axis-swapped tensor.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.dimshuffle`
+    :func:`~neuralnet_pytorch.utils.shape_padleft`
+    :func:`~neuralnet_pytorch.utils.shape_padright`
+    """
+
+    ndim = y.ndimension()
+    li = list(range(0, ndim))
+    li[axis1], li[axis2] = li[axis2], li[axis1]
+    return dimshuffle(y, li)
+
+
+def ravel_index(indices, shape):
     """
     Finds the linear index of `index` of a tensor of `shape`
     when it is flattened.
 
-    :param index:
-        a tuple of ``int`` s.
+    :param indices:
+        a tensor containing indices to be linearized.
     :param shape:
-        shape of the tensor.
+        shape of the tensor w.r.t the index tensor.
     :return:
         the linear index of the element having `index`.
 
@@ -675,22 +710,19 @@ def ravel_index(index, shape):
     >>> import neuralnet_pytorch as nnt
     >>> shape = (2, 3, 5)
     >>> a = T.arange(np.prod(shape)).view(*shape)
-    >>> index = (1, 1, 3)
-    >>> print(a[index])
-    tensor(23.)
-    >>> linear_index = nnt.utils.ravel_index(index, shape)
-    >>> print(linear_index)
-    tensor(23)
-    >>> print(a.flatten()[linear_index])
-    tensor(23.)
+    >>> indices = T.tensor([[1, 0, 1, 1], [0, 1, 2, 1], [1, 0, 4, 3]]).long()
+    >>> print(a[list(indices)])
+    tensor([16.,  5., 29., 23.])
+    >>> linear_indices = nnt.utils.ravel_index(indices, shape)
+    >>> print(linear_indices)
+    tensor([16,  5, 29, 23])
+    >>> print(a.flatten()[linear_indices])
+    tensor([16.,  5., 29., 23.])
     """
 
-    assert len(index) == len(shape), 'indices and shape must have the same length'
-    shape = T.tensor(shape)
-    if cuda_available:
-        shape = shape.cuda()
-
-    return sum([T.tensor(index[i], dtype=shape.dtype) * T.prod(shape[i + 1:]) for i in range(len(shape))])
+    assert indices.shape[0] == len(shape), 'indices and shape must have the same length'
+    shape = T.tensor(shape).to(indices.device)
+    return sum([indices[i].long() * T.prod(shape[i + 1:]) for i in range(len(shape))])
 
 
 def tile(x, dims):
@@ -803,7 +835,7 @@ def block_diag_sparse(a : T.Tensor, dense=False):
 
     :param a:
         a tensor of size ``(n, r, c)``.
-    :param dnese:
+    :param dense:
         whether to return a dense matrix.
         Default: ``False``.
     :return:
@@ -1051,13 +1083,8 @@ def batch_pairwise_dist(x, y):
     yy = T.bmm(y, y.transpose(2, 1))
     zz = T.bmm(x, y.transpose(2, 1))
 
-    if cuda_available:
-        dtype = T.cuda.LongTensor
-    else:
-        dtype = T.LongTensor
-
-    diag_ind_x = T.arange(0, num_points_x).type(dtype)
-    diag_ind_y = T.arange(0, num_points_y).type(dtype)
+    diag_ind_x = T.arange(0, num_points_x).to(device=x.device, dtype=x.dtype)
+    diag_ind_y = T.arange(0, num_points_y).to(device=x.device, dtype=x.dtype)
 
     rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
     ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
