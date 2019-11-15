@@ -1,9 +1,12 @@
 import torch as T
 import numpy as np
 from torch import testing
+import pytest
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import cuda_available
+
+dev = ('cpu', 'cuda') if cuda_available else ('cpu',)
 
 
 def test_gin_config():
@@ -27,16 +30,15 @@ def test_gin_config():
     run()
 
 
-def test_track():
+@pytest.mark.parametrize('device', dev)
+def test_track(device):
     shape = (2, 3, 5, 5)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
-    conv1 = nnt.track('op', nnt.Conv2d(shape, 4, 3), 'all')
-    conv2 = nnt.Conv2d(conv1.output_shape, 5, 3)
+    conv1 = nnt.track('op', nnt.Conv2d(shape, 4, 3), 'all').to(device)
+    conv2 = nnt.Conv2d(conv1.output_shape, 5, 3).to(device)
     intermediate = conv1(a)
-    output = nnt.track('conv2_output', conv2(intermediate), 'all')
+    output = nnt.track('conv2_output', conv2(intermediate), 'all').to(device)
     loss = T.sum(output ** 2)
     loss.backward(retain_graph=True)
     d_inter = T.autograd.grad(loss, intermediate, retain_graph=True)
@@ -50,11 +52,10 @@ def test_track():
         testing.assert_allclose(tracked_d_inter_, nnt.utils.to_numpy(d_inter_))
 
 
-def test_monitor():
+@pytest.mark.parametrize('device', dev)
+def test_monitor(device):
     shape = (64, 512)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
     n_epochs = 5
     n_iters = 10
@@ -78,9 +79,7 @@ def test_monitor():
     mon.reset()
 
     mon.dump('foo.txt', nnt.utils.to_numpy(a), 'txt')
-    loaded = mon.load('foo.txt', 'txt', dtype='float32')
-    if cuda_available:
-        loaded = nnt.utils.to_cuda(loaded)
+    loaded = T.from_numpy(mon.load('foo.txt', 'txt', dtype='float32')).to(device)
     testing.assert_allclose(a, loaded)
     mon.reset()
 
@@ -89,9 +88,7 @@ def test_monitor():
             mon.plot('parabol2', (it + epoch) ** 2)
             mon.hist('histogram2', a + (it * epoch))
             mon.dump('foo.txt', nnt.utils.to_numpy(a + it), 'txt', keep=3)
-    loaded = mon.load('foo.txt', 'txt', version=48, dtype='float32')
-    if cuda_available:
-        loaded = nnt.utils.to_cuda(loaded)
+    loaded = T.from_numpy(mon.load('foo.txt', 'txt', version=48, dtype='float32')).to(device)
     testing.assert_allclose(a + 8., loaded)
     mon.reset()
 

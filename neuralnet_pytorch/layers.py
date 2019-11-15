@@ -1699,7 +1699,7 @@ class BatchGraphConv(GraphConv):
         return output
 
 
-@nnt.utils.add_custom_repr
+@utils.add_custom_repr
 class GraphXConv(Module):
     """
     Performs GraphX Convolution as described here_.
@@ -1725,7 +1725,7 @@ class GraphXConv(Module):
         be broken into a multiplication of two matrices of sizes
         ``(num_out_points, rank)`` and ``(rank, input_shape[1])``.
     bias
-        whter to use bias.
+        whether to use bias.
         Default: ``True``.
     activation
         non-linear function to activate the linear result.
@@ -1751,7 +1751,7 @@ class GraphXConv(Module):
             assert rank <= self.out_instances // 2, 'rank should be smaller than half of num_out_points'
 
         self.rank = rank
-        self.activation = nnt.utils.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         pattern = list(range(len(input_shape)))
         pattern[-1], pattern[-2] = pattern[-2], pattern[-1]
         self.pattern = pattern

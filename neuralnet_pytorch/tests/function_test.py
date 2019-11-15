@@ -1,27 +1,28 @@
 import torch as T
 import numpy as np
 from torch import testing
+import pytest
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import cuda_available
 
+dev = ('cpu', 'cuda') if cuda_available else ('cpu',)
 
-def test_ravel_index():
+
+@pytest.mark.parametrize('device', dev)
+def test_ravel_index(device):
     shape = (2, 4, 5, 3)
-    a = T.arange(np.prod(shape)).reshape(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.arange(np.prod(shape)).reshape(*shape).to(device)
 
     indices = [[1, 0, 1, 1, 0], [1, 3, 3, 2, 1], [1, 1, 4, 0, 3], [1, 2, 2, 2, 0]]
     linear_indices = nnt.utils.ravel_index(indices, shape)
     testing.assert_allclose(linear_indices.type_as(a), a[indices])
 
 
-def test_shape_pad():
+@pytest.mark.parametrize('device', dev)
+def test_shape_pad(device):
     shape = (10, 10)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
     padded = nnt.utils.shape_padleft(a)
     expected = a.unsqueeze(0)
@@ -54,11 +55,10 @@ def test_shape_pad():
     testing.assert_allclose(padded.shape, expected.shape)
 
 
-def test_dimshuffle():
+@pytest.mark.parametrize('device', dev)
+def test_dimshuffle(device):
     shape = (64, 512)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
     dimshuffled = nnt.utils.dimshuffle(a, (0, 1, 'x', 'x'))
     expected = a.unsqueeze(2).unsqueeze(2)
@@ -86,11 +86,10 @@ def test_dimshuffle():
     testing.assert_allclose(dimshuffled.shape, expected.shape)
 
 
-def test_flatten():
+@pytest.mark.parametrize('device', dev)
+def test_flatten(device):
     shape = (10, 4, 2, 3, 6)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
     flatten = nnt.Flatten(2, input_shape=(None,) + shape[1:])
     expected = T.flatten(a, 2)
@@ -113,11 +112,10 @@ def test_flatten():
     testing.assert_allclose(flatten.output_shape, expected.shape)
 
 
-def test_reshape():
+@pytest.mark.parametrize('device', dev)
+def test_reshape(device):
     shape = (10, 3, 9, 9)
-    a = T.rand(*shape)
-    if cuda_available:
-        a = a.cuda()
+    a = T.rand(*shape).to(device)
 
     newshape = (-1, 9, 9)
     reshape = nnt.Reshape(newshape, input_shape=(None,) + shape[1:])

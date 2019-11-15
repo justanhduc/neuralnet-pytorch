@@ -577,7 +577,7 @@ class Monitor:
     def run_training(self, net, optim, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
                      train_stats_func=None, val_stats_func=None, *args, **kwargs):
         """
-        runs the training loop for the given neural network.
+        Runs the training loop for the given neural network.
 
         :param net:
             must be an instance of :class:`~neuralnet_pytorch.layers.Net`
@@ -662,64 +662,66 @@ class Monitor:
         }
 
         start_epoch = self.epoch if start_epoch is None else start_epoch
-        for epoch in range(start_epoch, n_epochs):
-            self.epoch = epoch
+        for epoch in self.iter_epoch(range(start_epoch, n_epochs)):
             if optim['scheduler'] is not None:
                 optim['scheduler'].step(epoch)
 
             for func_dict in self._schedule['beginning'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
-            for it, batch in enumerate(train_loader):
+            for it, batch in self.iter_batch(enumerate(train_loader)):
                 net.train(True)
-                with self:
-                    batch_cuda = utils.batch_to_cuda(batch)
-                    net.learn(optim, *batch_cuda, *args, **kwargs)
+                if nnt.cuda_available:
+                    batch = utils.batch_to_cuda(batch)
 
-                    if train_stats_func is None:
-                        for t, d in net.stats['train'].items():
-                            for k, v in d.items():
-                                if t == 'scalars':
-                                    if np.isnan(v) or np.isinf(v):
-                                        raise ValueError('{} is NaN/inf. Training failed!'.format(k))
+                net.learn(optim, *batch, *args, **kwargs)
 
-                                collect[t](k, v)
-                    else:
-                        train_stats_func(net.stats['train'], it)
+                if train_stats_func is None:
+                    for t, d in net.stats['train'].items():
+                        for k, v in d.items():
+                            if t == 'scalars':
+                                if np.isnan(v) or np.isinf(v):
+                                    raise ValueError('{} is NaN/inf. Training failed!'.format(k))
 
-                    if valid_freq:
-                        if self.iter % valid_freq == 0:
-                            net.eval()
+                            collect[t](k, v)
+                else:
+                    train_stats_func(net.stats['train'], it)
 
-                            with T.set_grad_enabled(False):
-                                eval_dict = {
-                                    'scalars': collections.defaultdict(lambda: []),
-                                    'histograms': collections.defaultdict(lambda: [])
-                                }
+                if valid_freq:
+                    if self.iter % valid_freq == 0:
+                        net.eval()
 
-                                for itt, batch in enumerate(eval_loader):
-                                    batch_cuda = utils.batch_to_cuda(batch)
-                                    try:
-                                        net.eval_procedure(*batch_cuda, *args, **kwargs)
-                                    except NotImplementedError:
-                                        print('An evaluation procedure must be specified')
-                                        raise
+                        with T.set_grad_enabled(False):
+                            eval_dict = {
+                                'scalars': collections.defaultdict(lambda: []),
+                                'histograms': collections.defaultdict(lambda: [])
+                            }
 
-                                    if val_stats_func is None:
-                                        for t, d in net.stats['eval'].items():
-                                            if t in ('scalars', 'histograms'):
-                                                for k, v in d.items():
-                                                    eval_dict[t][k].append(v)
-                                            else:
-                                                for k, v in d.items():
-                                                    collect[t](k + '_%d' % itt, v)
-                                    else:
-                                        val_stats_func(net.stats['eval'], itt)
+                            for itt, batch in enumerate(eval_loader):
+                                if nnt.cuda_available:
+                                    batch = utils.batch_to_cuda(batch)
 
-                                for t in ('scalars', 'histograms'):
-                                    for k, v in eval_dict[t].items():
-                                        v = np.mean(v) if t == 'scalars' else np.concatenate(v)
-                                        collect[t](k, v)
+                                try:
+                                    net.eval_procedure(*batch, *args, **kwargs)
+                                except NotImplementedError:
+                                    print('An evaluation procedure must be specified')
+                                    raise
+
+                                if val_stats_func is None:
+                                    for t, d in net.stats['eval'].items():
+                                        if t in ('scalars', 'histograms'):
+                                            for k, v in d.items():
+                                                eval_dict[t][k].append(v)
+                                        else:
+                                            for k, v in d.items():
+                                                collect[t](k + '_%d' % itt, v)
+                                else:
+                                    val_stats_func(net.stats['eval'], itt)
+
+                            for t in ('scalars', 'histograms'):
+                                for k, v in eval_dict[t].items():
+                                    v = np.mean(v) if t == 'scalars' else np.concatenate(v)
+                                    collect[t](k, v)
 
             for func_dict in self._schedule['end'].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
