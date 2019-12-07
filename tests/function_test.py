@@ -15,7 +15,7 @@ def test_ravel_index(device):
     a = T.arange(np.prod(shape)).reshape(*shape).to(device)
 
     indices = [[1, 0, 1, 1, 0], [1, 3, 3, 2, 1], [1, 1, 4, 0, 3], [1, 2, 2, 2, 0]]
-    linear_indices = nnt.utils.ravel_index(indices, shape)
+    linear_indices = nnt.utils.ravel_index(T.tensor(indices), shape)
     testing.assert_allclose(linear_indices.type_as(a), a[indices])
 
 

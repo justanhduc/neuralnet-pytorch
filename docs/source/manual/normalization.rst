@@ -23,4 +23,5 @@ Custom Lormalization Layers
 
 .. autoclass:: neuralnet_pytorch.normalization.FeatureNorm1d
 .. autoclass:: neuralnet_pytorch.normalization.AdaIN
+.. autoclass:: neuralnet_pytorch.normalization.MultiModuleAdaIN
 .. autoclass:: neuralnet_pytorch.normalization.MultiInputAdaIN

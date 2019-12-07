@@ -4,10 +4,10 @@ import torch.nn as nn
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import _image_shape, _matrix_shape, _pointset_shape
-from neuralnet_pytorch.layers import _LayerMethod, MultiMultiInputModule, MultiSingleInputModule
+from neuralnet_pytorch.layers import _LayerMethod, MultiMultiInputModule, MultiSingleInputModule, SingleMultiInputModule
 from neuralnet_pytorch.utils import cuda_available
 
-__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiInputAdaIN',
+__all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiModuleAdaIN', 'MultiInputAdaIN',
            'FeatureNorm1d', 'InstanceNorm1d', 'GroupNorm']
 
 
@@ -336,9 +336,50 @@ class GroupNorm(nn.GroupNorm, _LayerMethod):
         return self.activation(output)
 
 
-class AdaIN(MultiSingleInputModule):
+class _AdaIN:
+
+    def normalize(self, input1, input2):
+        mean1, std1 = T.mean(input1, self.dim1, keepdim=True), T.sqrt(T.var(input1, self.dim1, keepdim=True) + 1e-8)
+        mean2, std2 = T.mean(input2, self.dim2, keepdim=True), T.sqrt(T.var(input2, self.dim2, keepdim=True) + 1e-8)
+        return std2 * (input1 - mean1) / std1 + mean2
+
+
+class AdaIN(SingleMultiInputModule, _AdaIN):
     """
-    Adaptive Instance Normalization from https://arxiv.org/abs/1703.06868.
+    The original Adaptive Instance Normalization from https://arxiv.org/abs/1703.06868.
+
+    :math:`Y_1 = \\text{module}(X)`
+
+    :math:`Y_2 = \\text{module}(X)`
+
+    :math:`Y = \\sigma_{Y_2} * (Y_1 - \\mu_{Y_1}) / \\sigma_{Y_1} + \\mu_{Y_2}`
+
+    Parameters
+    ----------
+    module
+        a :mod:`torch` module which generates target feature maps.
+    dim
+        dimension to reduce in the target feature maps.
+        Default: ``(2, 3)``.
+    """
+
+    def __init__(self, module, dim=(2, 3)):
+        super().__init__(module)
+        self.dim1 = dim
+        self.dim2 = dim
+
+    def forward(self, *input, **kwargs):
+        out1, out2 = super().forward(*input, **kwargs)
+        return super().normalize(out1, out2)
+
+    def extra_repr(self):
+        s = 'dim={dim1}'.format(**self.__dict__)
+        return s
+
+
+class MultiModuleAdaIN(MultiSingleInputModule, _AdaIN):
+    """
+    A modified Adaptive Instance Normalization from https://arxiv.org/abs/1703.06868.
 
     :math:`Y_1 = \\text{module1}(X)`
 
@@ -353,21 +394,21 @@ class AdaIN(MultiSingleInputModule):
     module2
         a :mod:`torch` module which generates style feature maps.
     dim1
-        dimension to reduce in the target feature maps
+        dimension to reduce in the target feature maps.
+        Default: ``(2, 3)``.
     dim2
-        dimension to reduce in the style feature maps
+        dimension to reduce in the style feature maps.
+        Default: ``(2, 3)``.
     """
 
-    def __init__(self, module1, module2, dim1=1, dim2=1):
+    def __init__(self, module1, module2, dim1=(2, 3), dim2=(2, 3)):
         super().__init__(module1, module2)
         self.dim1 = dim1
         self.dim2 = dim2
 
     def forward(self, input, *args, **kwargs):
-        out1, out2 = super().forward(input)
-        mean1, std1 = T.mean(out1, self.dim1, keepdim=True), T.sqrt(T.var(out1, self.dim1, keepdim=True) + 1e-8)
-        mean2, std2 = T.mean(out2, self.dim2, keepdim=True), T.sqrt(T.var(out2, self.dim2, keepdim=True) + 1e-8)
-        return std2 * (out1 - mean1) / std1 + mean2
+        out1, out2 = super().forward(input, *args, **kwargs)
+        return super().normalize(out1, out2)
 
     @property
     @utils.validate
@@ -379,9 +420,9 @@ class AdaIN(MultiSingleInputModule):
         return s
 
 
-class MultiInputAdaIN(MultiMultiInputModule):
+class MultiInputAdaIN(MultiMultiInputModule, _AdaIN):
     """
-    Adaptive Instance Normalization from https://arxiv.org/abs/1703.06868.
+    A modified Adaptive Instance Normalization from https://arxiv.org/abs/1703.06868.
 
     :math:`Y_1 = \\text{module1}(X_1)`
 
@@ -396,21 +437,21 @@ class MultiInputAdaIN(MultiMultiInputModule):
     module2
         a :mod:`torch` module which generates style feature maps.
     dim1
-        dimension to reduce in the target feature maps
+        dimension to reduce in the target feature maps.
+        Default: ``(2, 3)``.
     dim2
-        dimension to reduce in the style feature maps
+        dimension to reduce in the style feature maps.
+        Default: ``(2, 3)``.
     """
 
-    def __init__(self, module1, module2, dim1=1, dim2=1):
+    def __init__(self, module1, module2, dim1=(2, 3), dim2=(2, 3)):
         super().__init__(module1, module2)
         self.dim1 = dim1
         self.dim2 = dim2
 
-    def forward(self, *input):
-        out1, out2 = super().forward(*input)
-        mean1, std1 = T.mean(out1, self.dim1, keepdim=True), T.sqrt(T.var(out1, self.dim1, keepdim=True) + 1e-8)
-        mean2, std2 = T.mean(out2, self.dim2, keepdim=True), T.sqrt(T.var(out2, self.dim2, keepdim=True) + 1e-8)
-        return std2 * (out1 - mean1) / std1 + mean2
+    def forward(self, *input, **kwargs):
+        out1, out2 = super().forward(*input, **kwargs)
+        return super().normalize(out1, out2)
 
     @property
     @utils.validate
@@ -483,6 +524,11 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
         output = self.activation(super().forward(input))
         output = output.view(*shape)
         return output
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.input_shape
 
     def reset(self):
         super().reset_parameters()

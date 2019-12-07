@@ -105,3 +105,36 @@ def test_monitor(device):
     loaded = mon.load('foo.pt', 'torch', version=49)['a']
     testing.assert_allclose(a + 9, loaded)
     mon.reset()
+
+
+@pytest.mark.parametrize(
+    'idx',
+    (slice(None, None), slice(None, 2), slice(1, None), slice(1, 3))
+)
+def test_slicing_sequential(idx):
+    input_shape = (None, 3, 256, 256)
+
+    a = nnt.Sequential(input_shape=input_shape)
+    a.conv1 = nnt.Conv2d(a.output_shape, 64, 3)
+    a.conv2 = nnt.Conv2d(a.output_shape, 128, 3)
+    a.conv3 = nnt.Conv2d(a.output_shape, 256, 3)
+    a.conv4 = nnt.Conv2d(a.output_shape, 512, 3)
+
+    b = a[idx]
+    start = 0 if idx.start is None else idx.start
+    assert b.input_shape == a[start].input_shape
+
+    class Foo(nnt.Sequential):
+        def __init__(self, input_shape):
+            super().__init__(input_shape=input_shape)
+
+            self.conv1 = nnt.Conv2d(self.output_shape, 64, 3)
+            self.conv2 = nnt.Conv2d(self.output_shape, 128, 3)
+            self.conv3 = nnt.Conv2d(self.output_shape, 256, 3)
+            self.conv4 = nnt.Conv2d(self.output_shape, 512, 3)
+
+    foo = Foo(input_shape)
+    b = foo[idx]
+    start = 0 if idx.start is None else idx.start
+    assert isinstance(b, nnt.Sequential)
+    assert b.input_shape == a[start].input_shape

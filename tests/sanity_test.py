@@ -41,6 +41,148 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 
 @pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('filter_size', 'stride', 'padding', 'dilation', 'output_shape'),
+    ((3, 1, 0, 1, (2, 5, 8, 8)),
+     (3, 1, 1, 1, (2, 5, 10, 10)),
+     (3, 2, 0, 1, (2, 5, 4, 4)),
+     (3, 2, 1, 1, (2, 5, 5, 5)),
+     (3, 1, 0, 2, (2, 5, 6, 6)),
+     (3, 1, 1, 2, (2, 5, 8, 8)),
+     (3, 2, 0, 2, (2, 5, 3, 3)),
+     (3, 2, 1, 2, (2, 5, 4, 4)),
+     (4, 1, 0, 1, (2, 5, 7, 7)),
+     (4, 1, 1, 1, (2, 5, 9, 9)),
+     (4, 2, 0, 1, (2, 5, 4, 4)),
+     (4, 2, 1, 1, (2, 5, 5, 5)),
+     (4, 1, 2, 1, (2, 5, 11, 11)),
+     (4, 2, 2, 1, (2, 5, 6, 6)),
+     (4, 1, 0, 2, (2, 5, 4, 4)),
+     (4, 1, 1, 2, (2, 5, 6, 6)),
+     (4, 2, 0, 2, (2, 5, 2, 2)),
+     (4, 2, 1, 2, (2, 5, 3, 3)),
+     (4, 1, 2, 2, (2, 5, 8, 8)),
+     (4, 2, 2, 2, (2, 5, 4, 4)))
+)
+def test_conv2d_layer(device, filter_size, stride, padding, dilation, output_shape):
+    shape = (2, 3, 10, 10)
+    n_filters = 5
+
+    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride, padding, dilation).to(device)
+    conv_pt = T.nn.Conv2d(shape[1], n_filters, filter_size, stride, padding, dilation).to(device)
+    sanity_check(conv_nnt, conv_pt, shape, device=device)
+
+    input = T.arange(np.prod(shape)).view(*shape).float().to(device)
+    out_nnt = conv_nnt(input)
+    out_pt = conv_pt(input)
+    testing.assert_allclose(conv_nnt.output_shape, out_pt.shape)
+    testing.assert_allclose(out_nnt.shape, output_shape)
+    testing.assert_allclose(conv_nnt.output_shape, output_shape)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('filter_size', 'stride', 'padding', 'output_size', 'output_shape'),
+    ((3, 1, 0, None, (2, 5, 12, 12)),
+     (3, 1, 1, None, (2, 5, 10, 10)),
+     (4, 1, 0, None, (2, 5, 13, 13)),
+     (4, 1, 1, None, (2, 5, 11, 11)),
+     (4, 1, 2, None, (2, 5, 9, 9)),
+     (3, 2, 0, None, (2, 5, 21, 21)),
+     (3, 2, 1, None, (2, 5, 19, 19)),
+     (3, 2, 1, (20, 20), (2, 5, 20, 20)),
+     (3, 2, 2, None, (2, 5, 17, 17)),
+     (4, 2, 0, None, (2, 5, 22, 22)),
+     (4, 2, 1, (21, 21), (2, 5, 21, 21)),
+     (4, 2, 1, None, (2, 5, 20, 20)),
+     (4, 2, 2, None, (2, 5, 18, 18)))
+)
+def test_convtranspose2d_layer(device, filter_size, stride, padding, output_size, output_shape):
+    shape = (2, 3, 10, 10)
+    n_filters = 5
+
+    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=stride, padding=padding,
+                                   output_size=output_size).to(device)
+    conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=padding, stride=stride).to(device)
+
+    input = T.arange(np.prod(shape)).view(*shape).float().to(device)
+    out_nnt = conv_nnt(input)
+    out_pt = conv_pt(input, output_size)
+    testing.assert_allclose(conv_nnt.output_shape, out_pt.shape)
+    testing.assert_allclose(out_nnt.shape, output_shape)
+    testing.assert_allclose(conv_nnt.output_shape, output_shape)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize('depth_mul', (1, 2))
+def test_depthwise_sepconv(device, depth_mul):
+    shape = (2, 3, 5, 5)
+    n_filters = 4
+    filter_size = 3
+    a = T.arange(np.prod(shape)).view(*shape).float().to(device)
+
+    conv_dw = nnt.DepthwiseSepConv2D(shape, n_filters, 3, depth_mul=depth_mul, bias=False).to(device)
+    conv = nnt.Conv2d(shape, n_filters, filter_size, bias=False).to(device)
+
+    weight = T.stack([F.conv2d(
+        conv_dw.depthwise.weight[i:i+1].transpose(0, 1), conv_dw.pointwise.weight[:, i:i+1]).squeeze()
+                      for i in range(shape[1] * depth_mul)])
+    weight = weight.view(shape[1], depth_mul, n_filters, 3, 3)
+    weight = weight.sum(1).transpose(0, 1)
+    conv.weight.data = weight
+    testing.assert_allclose(conv_dw(a), conv(a))
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('shape', 'output_shape'),
+    (((2, 3), (2, 4)),
+     ((None, 3), (None, 4)),
+     (3, (None, 4)))
+)
+def test_fc_layer(device, shape, output_shape):
+    out_features = 4
+
+    # test constructors
+    fc_nnt = nnt.FC(shape, out_features)
+    assert fc_nnt.output_shape == output_shape
+
+    fc_nnt = nnt.FC((2, 3), out_features)
+    fc_pt = T.nn.Linear(shape[1] if isinstance(shape, tuple) else shape, out_features)
+    sanity_check(fc_nnt, fc_pt, shape=(2, 3), device=device)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize('dim', (0, 1))
+def test_softmax(device, dim):
+    shape = (2, 3)
+    out_features = 4
+    a = T.rand(*shape).to(device)
+
+    sm = nnt.Softmax(shape, out_features, dim=dim).to(device)
+    expected = F.softmax(T.mm(a, sm.weight.t()) + sm.bias, dim=dim)
+    testing.assert_allclose(sm(a), expected)
+    testing.assert_allclose(sm.output_shape, expected.shape)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('shape', 'output_shape'),
+    (((2, 3, 4, 5), (2, 3, 4, 5)),
+     (3, (None, 3, None, None)),
+     ((None, 3, 4, None), (None, 3, 4, None)),
+     pytest.param((2, None, 4, 5), (2, None, 4, 5), marks=pytest.mark.xfail))
+)
+def test_batchnorm2d_layer(device, shape, output_shape):
+    bn_nnt = nnt.BatchNorm2d(shape)
+    assert bn_nnt.output_shape == output_shape
+
+    bn_nnt = nnt.BatchNorm2d((2, 3, 4, 5))
+    bn_pt = T.nn.BatchNorm2d(shape[1] if isinstance(shape, tuple) else shape)
+    sanity_check(bn_nnt, bn_pt, shape=(2, 3, 4, 5), device=device)
+
+
+@pytest.mark.parametrize('device', dev)
 def test_resnet_basic_block(device):
     shape = (64, 64, 32, 32)
     n_filters = 64
@@ -86,254 +228,66 @@ def test_resnet_bottleneck_block(device):
 
 
 @pytest.mark.parametrize('device', dev)
-def test_max_avg_pooling_layer(device):
-    shape = (64, 3, 32, 32)
-    filter_size = 3
-    stride1 = 1
-    stride2 = 2
-    padding = filter_size >> 1
-    dilation = 2
-    ceil_mode = True
-
-    # test constructors
-    pool_nnt = nnt.MaxPool2d(filter_size)
-    assert pool_nnt.output_shape == (None, None, None, None)
-
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=None, padding=0, dilation=1, ceil_mode=False, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=None, padding=0, dilation=1, ceil_mode=False)
+@pytest.mark.parametrize(
+    ('filter_size', 'stride', 'padding', 'dilation', 'ceil_mode', 'count_include_pad', 'shape', 'output_shape'),
+    ((2, None, 0, 1, False, True, (2, 3, 4, 4), (2, 3, 2, 2)),
+     (2, None, 0, 1, False, False, (2, 3, 5, 5), (2, 3, 2, 2)),
+     (2, None, 0, 1, True, True, (2, 3, 4, 4), (2, 3, 2, 2)),
+     (2, None, 0, 1, True, False, (2, 3, 5, 5), (2, 3, 3, 3)),
+     (3, 1, 0, 1, False, True, (2, 3, 4, 4), (2, 3, 2, 2)),
+     (3, 1, 1, 1, False, False, (2, 3, 4, 4), (2, 3, 4, 4)),
+     (3, 1, 1, 1, False, True, (2, 3, 5, 5), (2, 3, 5, 5)),
+     (3, 1, 1, 1, True, False, (2, 3, 5, 5), (2, 3, 5, 5)))
+)
+def test_max_avg_pooling_layer(device, filter_size, stride, padding, dilation, ceil_mode, count_include_pad,
+                               shape, output_shape):
+    pool_nnt = nnt.MaxPool2d(filter_size, stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                             input_shape=shape).to(device)
+    pool_pt = T.nn.MaxPool2d(filter_size, stride=stride, padding=padding, dilation=dilation,
+                             ceil_mode=ceil_mode).to(device)
     sanity_check(pool_nnt, pool_pt, shape, device=device)
+    testing.assert_allclose(pool_nnt.output_shape, output_shape)
 
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=stride1, padding=0, dilation=1, ceil_mode=False, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=stride1, padding=0, dilation=1, ceil_mode=False)
+    pool_nnt = nnt.AvgPool2d(filter_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                             count_include_pad=count_include_pad, input_shape=shape)
+    pool_pt = T.nn.AvgPool2d(filter_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                             count_include_pad=count_include_pad)
     sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=stride2, padding=0, dilation=1, ceil_mode=False, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=stride2, padding=0, dilation=1, ceil_mode=False)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=None, padding=padding, dilation=1, ceil_mode=False, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=None, padding=padding, dilation=1, ceil_mode=False)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=None, padding=0, dilation=dilation, ceil_mode=False, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=None, padding=0, dilation=dilation, ceil_mode=False)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.MaxPool2d(filter_size, stride=None, padding=0, dilation=1, ceil_mode=ceil_mode, input_shape=shape)
-    pool_pt = T.nn.MaxPool2d(filter_size, stride=None, padding=0, dilation=1, ceil_mode=ceil_mode)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
+    testing.assert_allclose(pool_nnt.output_shape, output_shape)
 
 
 @pytest.mark.parametrize('device', dev)
-def test_avg_pooling_layer(device):
-    shape = (64, 3, 32, 32)
-    filter_size = 3
-    stride1 = 1
-    stride2 = 2
-    padding = filter_size >> 1
-    ceil_mode = True
-    incl_pad = False
+@pytest.mark.parametrize('keepdim', (True, False))
+def test_global_avgpool2d(device, keepdim):
+    shape = (2, 3, 4, 5)
+    a = T.arange(np.prod(shape)).reshape(*shape).to(device)
+    expected = T.tensor([[9.5000, 29.5000, 49.5000],
+                         [69.5000, 89.5000, 109.5000]]).to(device)
+    if keepdim:
+        expected = expected.unsqueeze(-1).unsqueeze(-1)
 
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=stride1, padding=0, ceil_mode=False, count_include_pad=True,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=stride1, padding=0, ceil_mode=False, count_include_pad=True)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=stride2, padding=0, ceil_mode=False, count_include_pad=True,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=stride2, padding=0, ceil_mode=False, count_include_pad=True)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=None, padding=padding, ceil_mode=False, count_include_pad=True,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=None, padding=padding, ceil_mode=False, count_include_pad=True)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=ceil_mode, count_include_pad=True,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=ceil_mode, count_include_pad=True)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-    pool_nnt = nnt.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=False, count_include_pad=incl_pad,
-                             input_shape=shape)
-    pool_pt = T.nn.AvgPool2d(filter_size, stride=None, padding=0, ceil_mode=False, count_include_pad=incl_pad)
-    sanity_check(pool_nnt, pool_pt, shape, device=device)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_conv2d_layer(device):
-    shape = (64, 3, 32, 32)
-    n_filters = 64
-    filter_size = 3
-
-    # test constructors
-    conv_nnt = nnt.Conv2d(shape[1], n_filters, filter_size)
-    assert conv_nnt.output_shape == (None, n_filters, None, None)
-
-    conv_nnt = nnt.Conv2d((None, shape[1], None, None), n_filters, filter_size)
-    assert conv_nnt.output_shape == (None, n_filters, None, None)
-
-    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size)
-    conv_pt = T.nn.Conv2d(shape[1], n_filters, filter_size, padding=filter_size >> 1)
-    sanity_check(conv_nnt, conv_pt, shape, device=device)
-
-    shape = (None, 3, None, 224)
-    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride=2)
-    assert conv_nnt.output_shape == (None, 64, None, 112)
-
-    shape = (None, 3, None, None)
-    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride=2)
-    assert conv_nnt.output_shape == (None, 64, None, None)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_convtranspose2d_layer(device):
-    shape = (64, 3, 32, 32)
-    n_filters = 64
-    filter_size = 3
-
-    # test constructors
-    conv_nnt = nnt.ConvTranspose2d(shape[1], n_filters, filter_size)
-    assert conv_nnt.output_shape == (None, n_filters, None, None)
-
-    conv_nnt = nnt.ConvTranspose2d((None, shape[1], None, None), n_filters, filter_size)
-    assert conv_nnt.output_shape == (None, n_filters, None, None)
-
-    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size)
-    conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=filter_size >> 1)
-    sanity_check(conv_nnt, conv_pt, shape, device=device)
-
-    stride = 2
-    new_size = tuple(i * stride for i in shape[2:])
-    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2, output_size=new_size)
-    conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=filter_size >> 1, stride=2)
-    input = T.rand(*shape)
-    if nnt.cuda_available:
-        input = input.cuda()
-        conv_pt = conv_pt.cuda()
-
-    out_nnt = conv_nnt(input)
-    out_pt = conv_pt(input, new_size)
-    assert conv_nnt.output_shape[2:] == out_nnt.shape[2:] == out_pt.shape[2:]
-
-    shape = (None, 3, None, 112)
-    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2)
-    assert conv_nnt.output_shape == (None, 64, None, 223)
-
-    shape = (None, 3, None, None)
-    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=2)
-    assert conv_nnt.output_shape == (None, 64, None, None)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_fc_layer(device):
-    shape = (64, 128)
-    n_nodes = 256
-
-    # test constructors
-    fc_nnt = nnt.FC(shape[1], n_nodes)
-    assert fc_nnt.output_shape == (None, n_nodes)
-
-    fc_nnt = nnt.FC((None, shape[1]), n_nodes)
-    assert fc_nnt.output_shape == (None, n_nodes)
-
-    fc_nnt = nnt.FC(shape, n_nodes)
-    fc_pt = T.nn.Linear(shape[1], n_nodes)
-    sanity_check(fc_nnt, fc_pt, shape, device=device)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_batchnorm2d_layer(device):
-    shape = (64, 3, 32, 32)
-
-    # test constructors
-    bn_nnt = nnt.BatchNorm2d(shape[1])
-    assert bn_nnt.output_shape == (None, shape[1], None, None)
-
-    bn_nnt = nnt.BatchNorm2d((None, shape[1], None, None))
-    assert bn_nnt.output_shape == (None, shape[1], None, None)
-
-    bn_nnt = nnt.BatchNorm2d(shape)
-    bn_pt = T.nn.BatchNorm2d(shape[1])
-    sanity_check(bn_nnt, bn_pt, shape, device=device)
-
-    shape = (None, 3, None, None)
-    bn_nnt = nnt.BatchNorm2d(shape)
-    assert bn_nnt.output_shape == (None, 3, None, None)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_softmax(device):
-    shape = (64, 512)
-    out_features = 1000
-    a = T.rand(*shape).to(device)
-
-    sm = nnt.Softmax(shape, out_features).to(device)
-    expected = F.softmax(T.mm(a, sm.weight.t()) + sm.bias, dim=1)
-    testing.assert_allclose(sm(a), expected)
-    testing.assert_allclose(sm.output_shape, expected.shape)
-
-    sm = nnt.Softmax(shape, out_features, dim=0).to(device)
-    expected = F.softmax(T.mm(a, sm.weight.t()) + sm.bias, dim=0)
-    testing.assert_allclose(sm(a), expected)
-    testing.assert_allclose(sm.output_shape, expected.shape)
-
-
-@pytest.mark.parametrize('device', dev)
-def test_global_avgpool2d(device):
-    shape = (4, 3, 256, 512)
-    a = T.rand(*shape).to(device)
-
-    pool = nnt.GlobalAvgPool2D(input_shape=shape)
-    expected = T.mean(a, (2, 3))
-    testing.assert_allclose(pool(a), expected)
-    testing.assert_allclose(pool.output_shape, expected.shape)
-
-    pool = nnt.GlobalAvgPool2D(keepdim=True, input_shape=shape)
-    expected = T.mean(a, (2, 3)).unsqueeze(-1).unsqueeze(-1)
+    pool = nnt.GlobalAvgPool2D(keepdim=keepdim, input_shape=shape)
     testing.assert_allclose(pool(a), expected)
     testing.assert_allclose(pool.output_shape, expected.shape)
 
 
 @pytest.mark.parametrize('device', dev)
-def test_dimshuffle_layer(device):
-    shape = (64, 512)
+@pytest.mark.parametrize(
+    ('pattern', 'output_shape'),
+    (((1, 0), (3, 2)),
+     ((0, 1, 'x', 'x'), (2, 3, 1, 1)),
+     ((1, 0, 'x', 'x'), (3, 2, 1, 1)),
+     ((0, 'x', 1, 'x'), (2, 1, 3, 1)),
+     ((1, 'x', 'x', 0), (3, 1, 1, 2)),
+     ((1, 'x', 0, 'x', 'x'), (3, 1, 2, 1, 1)))
+)
+def test_dimshuffle_layer(device, pattern, output_shape):
+    shape = (2, 3)
     a = T.rand(*shape).to(device)
 
-    dimshuffle = nnt.DimShuffle((1, 0), input_shape=shape)
-    expected = a.transpose(1, 0)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
-
-    dimshuffle = nnt.DimShuffle((0, 1, 'x', 'x'), input_shape=shape)
-    expected = a.unsqueeze(2).unsqueeze(2)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
-
-    dimshuffle = nnt.DimShuffle((1, 0, 'x', 'x'), input_shape=shape)
-    expected = a.permute(1, 0).unsqueeze(2).unsqueeze(2)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
-
-    dimshuffle = nnt.DimShuffle((0, 'x', 1, 'x'), input_shape=shape)
-    expected = a.unsqueeze(2).permute(0, 2, 1).unsqueeze(3)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
-
-    dimshuffle = nnt.DimShuffle((1, 'x', 'x', 0), input_shape=shape)
-    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(1)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
-
-    dimshuffle = nnt.DimShuffle((1, 'x', 0, 'x', 'x'), input_shape=shape)
-    expected = a.permute(1, 0).unsqueeze(1).unsqueeze(3).unsqueeze(3)
-    testing.assert_allclose(dimshuffle(a), expected)
-    testing.assert_allclose(dimshuffle.output_shape, expected.shape)
+    dimshuffle = nnt.DimShuffle(pattern, input_shape=shape)
+    testing.assert_allclose(dimshuffle.output_shape, output_shape)
+    testing.assert_allclose(dimshuffle(a).shape, output_shape)
 
 
 @pytest.mark.parametrize('device', dev)
@@ -538,3 +492,69 @@ def test_spectral_norm(device):
     testing.assert_allclose(net_pt_sn[1][0].weight, net_nnt_sn[1][0].weight)
     testing.assert_allclose(net_pt_sn[1][1].weight, net_nnt_sn[1][1].weight)
     testing.assert_allclose(net_pt_sn[6].weight, net_nnt_sn[6].weight)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('size', 'scale_factor', 'mode', 'align_corners', 'input_shape'),
+    ((None, .6, 'bilinear', True, (2, 3, 10, 10)),
+     (None, 1.3, 'bicubic', True, (2, 3, 10, 10)),
+     (None, (.6, 1.3), 'nearest', None, (2, 3, 10, 10)),
+     ((8, 15), None, 'bicubic', True, (2, 3, 10, 10)),
+     (None, 2.1, 'linear', True, (2, 3, 10)),
+     ((15,), None, 'nearest', None, (2, 3, 10)),
+     (None, 2.5, 'trilinear', None, (2, 3, 10, 10, 10)),
+     (None, (2.5, 1.2, .4), 'area', None, (2, 3, 10, 10, 10)),
+     ((15, 10, 9), None, 'nearest', None, (2, 3, 10, 10, 10)))
+)
+def test_interpolate(device, size, scale_factor, mode, align_corners, input_shape):
+    a = T.arange(np.prod(input_shape)).view(*input_shape).to(device)
+    interp = nnt.Interpolate(size, scale_factor, mode, align_corners, input_shape)
+
+    output = F.interpolate(a, size, scale_factor, mode, align_corners)
+    output_nnt = interp(a)
+
+    testing.assert_allclose(output_nnt, output)
+    testing.assert_allclose(interp.output_shape, output.shape)
+
+
+@pytest.mark.parametrize('device', dev)
+@pytest.mark.parametrize(
+    ('dim1', 'dim2'),
+    ((1, (2, 3)),
+     ((2, 3), (1, 2)),
+     (2, (1, 3)))
+)
+def test_adain(device, dim1, dim2):
+
+    def _expected(module1, module2, input1, input2, dim1, dim2):
+        output1 = module1(input1)
+        output2 = module2(input2)
+        mean1, std1 = T.mean(output1, dim1, keepdim=True), T.sqrt(T.var(output1, dim1, keepdim=True) + 1e-8)
+        mean2, std2 = T.mean(output2, dim2, keepdim=True), T.sqrt(T.var(output2, dim2, keepdim=True) + 1e-8)
+        return std2 * (output1 - mean1) / std1 + mean2
+
+    shape = (2, 3, 4, 5)
+    a = T.rand(*shape).to(device)
+    b = T.rand(*shape).to(device)
+
+    module1 = nnt.Conv2d(shape, 6, 3).to(device)
+    module2 = nnt.Conv2d(shape, 6, 3).to(device)
+    adain = nnt.AdaIN(module1, dim1).to(device)
+    mi_adain = nnt.MultiInputAdaIN(module1, module2, dim1=dim1, dim2=dim2).to(device)
+    mm_adain = nnt.MultiModuleAdaIN(module1, module2, dim1=dim1, dim2=dim2).to(device)
+
+    actual_adain = adain(a, b)
+    expected_adain = _expected(module1, module1, a, b, dim1, dim1)
+    testing.assert_allclose(actual_adain, expected_adain)
+    testing.assert_allclose(adain.output_shape, expected_adain.shape)
+
+    actual_mi_adain = mi_adain(a, b)
+    expected_mi_adain = _expected(module1, module2, a, b, dim1, dim2)
+    testing.assert_allclose(actual_mi_adain, expected_mi_adain)
+    testing.assert_allclose(mi_adain.output_shape, expected_mi_adain.shape)
+
+    actual_mm_adain = mm_adain(a)
+    expected_mm_adain = _expected(module1, module2, a, a, dim1, dim2)
+    testing.assert_allclose(actual_mm_adain, expected_mm_adain)
+    testing.assert_allclose(mm_adain.output_shape, expected_mm_adain.shape)

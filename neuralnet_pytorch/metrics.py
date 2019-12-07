@@ -11,12 +11,12 @@ __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'ch
            'spectral_norm']
 
 
-def huber_loss(x, y, reduction='mean'):
+def huber_loss(x, y, reduce='mean'):
     """
     An alias for :func:`torch.nn.functional.smooth_l1_loss`.
     """
 
-    return F.smooth_l1_loss(x, y, reduction)
+    return F.smooth_l1_loss(x, y, reduce=reduce)
 
 
 def first_derivative_loss(x, y, p=2):
@@ -63,10 +63,11 @@ def lp_loss(x, y, p=2, reduction='mean'):
     :param p:
         order of the norm.
     :param reduction:
-        ```mean``` or ```sum```.
+        ``'mean'`` or ``'sum'``.
     :return:
         the p-norm of (x - y).
     """
+    assert reduction in ('sum', 'mean'), 'Unknown choice of reduction'
 
     if y.ndimension() != x.ndimension():
         raise TypeError('y should have the same shape as y_pred', ('y', y.data.type(), 'y_pred', x.data.type()))
@@ -76,7 +77,8 @@ def lp_loss(x, y, p=2, reduction='mean'):
     elif p == 2:
         return F.mse_loss(x, y, reduction=reduction)
     else:
-        return T.mean(T.abs(x - y) ** p)
+        reduce = T.mean if reduction == 'mean' else T.sum
+        return reduce(T.abs(x - y) ** p)
 
 
 def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
@@ -93,7 +95,7 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=True):
     :param xyz2:
         a point cloud of shape (b, n2, k).
     :param reduce:
-        ```mean``` or ```sum```. Default: ```sum```.
+        ``'mean'`` or ``'sum'``. Default: ``'sum'``.
     :param c_code:
         whether to use CUDA implementation.
         This version is much more memory-friendly and slightly faster.
@@ -231,7 +233,7 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
         containing module.
     :param name:
         name of weight parameter.
-        Default: ```weight```.
+        Default: ``'weight'``.
     :param n_power_iterations:
         number of power iterations to calculate spectral norm.
     :param eps:

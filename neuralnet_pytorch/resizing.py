@@ -20,9 +20,11 @@ class Interpolate(Module):
     Parameters
     ----------
     size
-        output spatial sizes. Optional.
+        output spatial sizes. Mutually exclusive with :attr:`scale_factor`.
     scale_factor
-        multiplier for spatial size. Has to match input size if it is a tuple. Optional.
+        float or tuple of floats.
+        Multiplier for spatial size. Has to match input size if it is a tuple.
+        Mutually exclusive with :attr:`size`.
     mode
         talgorithm used for upsampling:
         ``'nearest'``, ``'linear'``, ``'bilinear'``,
@@ -42,9 +44,8 @@ class Interpolate(Module):
         shape of the input tensor. Optional.
     """
 
-    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=False, input_shape=None):
-        assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
-                                                             'Received %s.' % type(scale_factor)
+    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=None, input_shape=None):
+        assert size is not None or scale_factor is not None, 'size and scale_factor cannot be not None'
         super().__init__(input_shape)
 
         self.size = size
@@ -63,7 +64,7 @@ class Interpolate(Module):
 
         scale_factor = _ntuple(len(self.input_shape) - 2)(self.scale_factor)
         shape = [np.nan if s is None else s for s in self.input_shape]
-        return (shape[:2] + self.size) if self.size \
+        return (tuple(shape[:2]) + tuple(self.size)) if self.size \
             else shape[:2] + [shape[i + 2] * scale_factor[i] for i in range(len(scale_factor))]
 
     def extra_repr(self):
@@ -73,8 +74,24 @@ class Interpolate(Module):
         return s
 
 
+class _Pool2d(_LayerMethod):
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if all(self.input_shape) is None:
+            return tuple(self.input_shape)
+
+        integize = np.ceil if self.ceil_mode else np.floor
+        shape = [np.nan if x is None else x for x in self.input_shape]
+        ks = [1 + (fs - 1) * d for fs, d in zip(self.kernel_size, self.dilation)]
+        shape[2] = integize((shape[2] + 2 * self.padding[0] - ks[0]) / self.stride[0] + 1)
+        shape[3] = integize((shape[3] + 2 * self.padding[1] - ks[1]) / self.stride[1] + 1)
+        return shape
+
+
 @utils.add_simple_repr
-class AvgPool2d(nn.AvgPool2d, _LayerMethod):
+class AvgPool2d(nn.AvgPool2d, _Pool2d):
     """
     Applies a 2D average pooling over an input signal composed of several input
     planes.
@@ -101,36 +118,16 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
         stride = kernel_size if stride is None else (stride, stride) if isinstance(stride, int) else tuple(stride)
         padding = (padding, padding) if isinstance(padding, int) else tuple(padding)
+        self.dilation = (1, 1)
         super().__init__(kernel_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
                          count_include_pad=count_include_pad)
 
     def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
 
-    @property
-    @utils.validate
-    def output_shape(self):
-        if all(self.input_shape) is None:
-            return tuple(self.input_shape)
-
-        shape = [np.nan if x is None else x for x in self.input_shape]
-        shape[2] = (shape[2] + 2 * self.padding[0] - self.kernel_size[0]) // self.stride[0] + 1
-        shape[3] = (shape[3] + 2 * self.padding[1] - self.kernel_size[1]) // self.stride[1] + 1
-
-        rem_h = np.mod(shape[2], self.stride[0])
-        if rem_h and not np.isnan(rem_h):
-            if self.ceil_mode:
-                shape[2] += np.mod(shape[2], self.stride[0])
-
-        rem_w = np.mod(shape[3], self.stride[1])
-        if rem_w and not np.isnan(rem_w):
-            if self.ceil_mode:
-                shape[3] += np.mod(shape[3], self.stride[1])
-        return tuple(shape)
-
 
 @utils.add_simple_repr
-class MaxPool2d(nn.MaxPool2d, _LayerMethod):
+class MaxPool2d(nn.MaxPool2d, _Pool2d):
     """
     Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -167,28 +164,6 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
 
     def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
-
-    @property
-    @utils.validate
-    def output_shape(self):
-        if all(self.input_shape) is None:
-            return tuple(self.input_shape)
-
-        shape = [np.nan if x is None else x for x in self.input_shape]
-        ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(self.kernel_size, self.dilation)]
-        shape[2] = (shape[2] + 2 * self.padding[0] - ks[0]) // self.stride[0] + 1
-        shape[3] = (shape[3] + 2 * self.padding[1] - ks[1]) // self.stride[1] + 1
-
-        rem_h = np.mod(shape[2], self.stride[0])
-        if rem_h and not np.isnan(rem_h):
-            if self.ceil_mode:
-                shape[2] += np.mod(shape[2], self.stride[0])
-
-        rem_w = np.mod(shape[3], self.stride[1])
-        if rem_w and not np.isnan(rem_w):
-            if self.ceil_mode:
-                shape[3] += np.mod(shape[3], self.stride[1])
-        return tuple(shape)
 
 
 @utils.add_custom_repr
