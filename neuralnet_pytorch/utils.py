@@ -1,11 +1,10 @@
 import numpy as np
 import torch as T
 import torch.nn.functional as F
-import abc
 import threading
 import warnings
-from torch.utils.data.dataloader import default_collate
 import numbers
+from torch.utils.data.dataloader import default_collate
 from queue import Queue
 from scipy.stats import truncnorm
 from torch._six import container_abcs
@@ -290,11 +289,11 @@ class DataLoader:
             yield batch
 
 
-def truncated_normal(tensor, a=-1, b=1, mean=0., std=1.):
+def truncated_normal(x: T.Tensor, a=-1, b=1, mean=0., std=1.):
     """
     Initializes a tensor from a truncated normal distribution.
 
-    :param tensor:
+    :param x:
         a :class:`torch.Tensor`.
     :param a:
         lower bound of the truncated normal.
@@ -308,12 +307,12 @@ def truncated_normal(tensor, a=-1, b=1, mean=0., std=1.):
         ``None``.
     """
 
-    values = truncnorm.rvs(a, b, loc=mean, scale=std, size=list(tensor.shape))
+    values = truncnorm.rvs(a, b, loc=mean, scale=std, size=list(x.shape))
     with T.no_grad():
-        tensor.data.copy_(T.tensor(values))
+        x.data.copy_(T.tensor(values))
 
 
-def rgb2gray(img):
+def rgb2gray(img: T.Tensor):
     """
     Converts a batch of RGB images to gray.
 
@@ -329,7 +328,7 @@ def rgb2gray(img):
     return (0.299 * img[:, 0] + 0.587 * img[:, 1] + 0.114 * img[:, 2]).unsqueeze(1)
 
 
-def rgb2ycbcr(img):
+def rgb2ycbcr(img: T.Tensor):
     """
     Converts a batch of RGB images to YCbCr.
 
@@ -348,7 +347,7 @@ def rgb2ycbcr(img):
     return T.cat((Y.unsqueeze(1), Cb.unsqueeze(1), Cr.unsqueeze(1)), 1)
 
 
-def ycbcr2rgb(img):
+def ycbcr2rgb(img: T.Tensor):
     """
     Converts a batch of YCbCr images to RGB.
 
@@ -367,7 +366,7 @@ def ycbcr2rgb(img):
     return T.cat((R.unsqueeze(1), G.unsqueeze(1), B.unsqueeze(1)), 1)
 
 
-def rgba2rgb(img):
+def rgba2rgb(img: T.Tensor):
     """
     Converts a batch of RGBA images to RGB.
 
@@ -390,7 +389,7 @@ def rgba2rgb(img):
     return out
 
 
-def gram_matrix(x):
+def gram_matrix(x: T.Tensor) -> T.Tensor:
     """
     Computes the Gram matrix given a 4D tensor.
 
@@ -400,13 +399,13 @@ def gram_matrix(x):
         the Gram matrix of `x`.
     """
 
-    a, b, c, d = x.size()
-    features = x.view(a * b, c * d)
-    G = T.mm(features, features.t())
-    return G.div(a * b * c * d)
+    b, c, h, w = x.shape
+    features = x.view(b, c, -1)
+    G = T.bmm(features, features.transpose(-1, -2))
+    return G.div(np.prod(x.shape[1:]))
 
 
-def var(x, dim=None, unbiased=True, keepdim=False):
+def var(x: T.Tensor, dim=None, unbiased=True, keepdim=False):
     """
     Calculates the variance of `x` along `dim`.
     Exists because :mod:`torch.var` sometimes causes some error in backward pass.
@@ -441,7 +440,7 @@ def var(x, dim=None, unbiased=True, keepdim=False):
     return var
 
 
-def std(x, dim=None, unbiased=True, keepdim=False):
+def std(x: T.Tensor, dim=None, unbiased=True, keepdim=False):
     """
     Calculates the standard deviation of `x` along `dim`.
     Exists because :mod:`torch.std` sometimes causes some error in backward pass.
@@ -480,7 +479,7 @@ def batch_set_value(params, values):
         p.data.copy_(T.from_numpy(v))
 
 
-def to_numpy(x):
+def to_numpy(x: T.Tensor):
     """
     Moves a tensor to :mod:`numpy`.
 
@@ -493,7 +492,7 @@ def to_numpy(x):
     return x.cpu().detach().data.numpy()
 
 
-def to_cuda(x):
+def to_cuda(x: np.ndarray):
     """
     Moves a :mod:`numpy` to tensor.
 
@@ -565,12 +564,15 @@ def bulk_to_cuda_sparse(xs):
 
 
 def batch_to_cuda(batch):
-    batch_cuda = [b.cuda() if not isinstance(b, (list, tuple))
-                  else [bb.cuda() for bb in b] for b in batch]
+    assert isinstance(batch, (T.Tensor, list, tuple)), 'Unknownn type of batch'
+
+    batch_cuda = batch.cuda() if isinstance(batch, T.Tensor) \
+        else [b.cuda() if not isinstance(b, (list, tuple))
+              else [bb.cuda() for bb in b] for b in batch]
     return batch_cuda
 
 
-def dimshuffle(x, pattern):
+def dimshuffle(x: T.Tensor, pattern):
     """
     Reorders the dimensions of this variable, optionally inserting broadcasted dimensions.
     Inspired by `Theano's dimshuffle`_.
@@ -609,7 +611,7 @@ def dimshuffle(x, pattern):
     return y.view(*shape)
 
 
-def shape_padleft(x, n_ones=1):
+def shape_padleft(x: T.Tensor, n_ones=1):
     """
     Reshape `x` by left-padding the shape with `n_ones` 1s.
     Inspired by `Theano's shape_padleft`_.
@@ -633,7 +635,7 @@ def shape_padleft(x, n_ones=1):
     return dimshuffle(x, pattern)
 
 
-def shape_padright(x, n_ones=1):
+def shape_padright(x: T.Tensor, n_ones=1):
     """
     Reshape `x` by right-padding the shape with `n_ones` 1s.
     Inspired by `Theano's shape_padright`_.
@@ -657,7 +659,7 @@ def shape_padright(x, n_ones=1):
     return dimshuffle(x, pattern)
 
 
-def swapaxes(y, axis1, axis2):
+def swapaxes(y: T.Tensor, axis1, axis2):
     """
     Swaps two given axes in the input tensor.
     If the input is of shape :math:`(n_1, n_2, ..., n_{axis1}, ..., n_{axis2}, ...)`,
@@ -690,7 +692,7 @@ def swapaxes(y, axis1, axis2):
     return dimshuffle(y, li)
 
 
-def ravel_index(indices, shape):
+def ravel_index(indices: T.Tensor, shape):
     """
     Finds the linear index of `index` of a tensor of `shape`
     when it is flattened.
@@ -725,7 +727,7 @@ def ravel_index(indices, shape):
     return sum([indices[i].long() * T.prod(shape[i + 1:]) for i in range(len(shape))])
 
 
-def tile(x, dims):
+def tile(x: T.Tensor, dims):
     """
     Repeats `x` along `dims`.
     Behaves like :func:`numpy.tile`.
@@ -741,7 +743,7 @@ def tile(x, dims):
     return x.repeat(*dims)
 
 
-def repeat(input, repeats, dim=None):
+def repeat(input: T.Tensor, repeats, dim=None):
     """
     Repeats elements of a tensor like :func:`numpy.repeat`.
 
@@ -823,7 +825,7 @@ def block_diag(*blocks):
     return out
 
 
-def block_diag_sparse(a : T.Tensor, dense=False):
+def block_diag_sparse(a: T.Tensor, dense=False):
     """
     Creates a sparse block diagonal matrix from the provided array.
     Given the input tensor of size ``(n, r, c)``, the output will have
@@ -910,8 +912,8 @@ def smooth(x, beta=.9, window='hanning'):
     :param beta:
         the weighted moving average coeff. Window length is :math:`1 / (1 - \\beta)`.
     :param window:
-        the type of window from ```flat```, ```hanning```, ```hamming```,
-        ```bartlett```, and ```blackman```.
+        the type of window from ``'flat'``, ``'hanning'``, ``'hamming'``,
+        ``'bartlett'``, and ``'blackman'``.
         Flat window will produce a moving average smoothing.
     :return:
         the smoothed signal.
@@ -967,7 +969,7 @@ def get_bilinear_weights(x: T.Tensor, y: T.Tensor, h: int, w: int, border_mode='
         width of the 2D array
     :param border_mode:
         strategy to deal with borders.
-        Choices are ```nearest``` (default), ```mirror```, and ```wrap```.
+        Choices are ``'nearest'`` (default), ``'mirror'``, and ``'wrap'``.
     :return:
         the weights for bilinear interpolation and the integer coordinates.
     """
@@ -1024,12 +1026,13 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
         If not specified, output will have the same shape as input.
     :param border_mode:
         strategy to deal with borders.
-        Choices are ```nearest``` (default), ```mirror```, and ```wrap```.
+        Choices are ``'nearest'`` (default), ``'mirror'``, and ``'wrap'``.
     :return:
         the bilinear interpolated batch of images.
     """
-    if im.ndim != 4:
-        raise TypeError('im should be a 4D Tensor image, got %dD' % im.ndim)
+
+    if im.ndimension() != 4:
+        raise TypeError('im should be a 4D Tensor image, got %dD' % im.ndimension())
 
     output_shape = output_shape if output_shape else im.shape[2:]
     x, y = x.flatten(), y.flatten()
@@ -1065,7 +1068,7 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
     return dimshuffle(output, (0, 3, 1, 2))
 
 
-def batch_pairwise_dist(x, y):
+def batch_pairwise_dist(x: T.Tensor, y: T.Tensor):
     """
     Calculates the pair-wise distance between two sets of points.
 
@@ -1121,7 +1124,7 @@ def time_cuda_module(f, *args, **kwargs):
     return total
 
 
-def slack_message(username, message, channel, token, **kwargs):
+def slack_message(username: str, message: str, channel: str, token: str, **kwargs):
     """
     Sends a slack message to the specified chatroom.
 
@@ -1143,7 +1146,7 @@ def slack_message(username, message, channel, token, **kwargs):
     sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
 
 
-def relu(x, **kwargs):
+def relu(x: T.Tensor, **kwargs):
     """
     ReLU activation.
     """
@@ -1151,7 +1154,7 @@ def relu(x, **kwargs):
     return T.relu(x)
 
 
-def linear(x, **kwargs):
+def linear(x: T.Tensor, **kwargs):
     """
     Linear activation.
     """
@@ -1159,7 +1162,7 @@ def linear(x, **kwargs):
     return x
 
 
-def lrelu(x, **kwargs):
+def lrelu(x: T.Tensor, **kwargs):
     """
     Leaky ReLU activation.
     """
@@ -1167,7 +1170,7 @@ def lrelu(x, **kwargs):
     return F.leaky_relu(x, kwargs.get('negative_slope', .2), kwargs.get('inplace', False))
 
 
-def tanh(x, **kwargs):
+def tanh(x: T.Tensor, **kwargs):
     """
     Hyperbolic tangent activation.
     """
@@ -1175,7 +1178,7 @@ def tanh(x, **kwargs):
     return T.tanh(x)
 
 
-def sigmoid(x, **kwargs):
+def sigmoid(x: T.Tensor, **kwargs):
     """
     Sigmoid activation.
     """
@@ -1183,7 +1186,7 @@ def sigmoid(x, **kwargs):
     return T.sigmoid(x)
 
 
-def elu(x, **kwargs):
+def elu(x: T.Tensor, **kwargs):
     """
     ELU activation.
     """
@@ -1191,7 +1194,7 @@ def elu(x, **kwargs):
     return F.elu(x, kwargs.get('alpha', 1.), kwargs.get('inplace', False))
 
 
-def softmax(x, **kwargs):
+def softmax(x: T.Tensor, **kwargs):
     """
     Softmax activation.
     """
@@ -1199,7 +1202,7 @@ def softmax(x, **kwargs):
     return T.softmax(x, kwargs.get('dim', None))
 
 
-def selu(x, **kwargs):
+def selu(x: T.Tensor, **kwargs):
     """
     SELU activation.
     """
@@ -1222,11 +1225,11 @@ act = {
 
 def function(activation, **kwargs):
     """
-    returns the `activation`.
-    Possible choices are
-    ``None``, ```linear```, ```relu```, ```lrelu```,
-    ```tanh```, ```sigmoid```, ```elu```, ```softmax```,
-    and ```selu```.
+    returns the `activation`. Can be ``str`` or ``callable``.
+    For ``str``, possible choices are
+    ``None``, ``'linear'``, ``'relu'``, ``'lrelu'``,
+    ``'tanh'``, ``'sigmoid'``, ``'elu'``, ``'softmax'``,
+    and ``'selu'``.
 
     :param activation:
         name of the activation function.

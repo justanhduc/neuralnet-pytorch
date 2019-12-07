@@ -46,7 +46,7 @@ script:
   - echo "$PART"
   - python -c 'import torch; print(torch.__version__)'
   - python -c 'import neuralnet_pytorch; print(neuralnet_pytorch.__version__)'
-  - python -m pytest -sv neuralnet_pytorch/tests/
+  - python -m pytest -sv tests/
 
 after_failure:
 - cat /home/travis/.pip/pip.log

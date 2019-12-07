@@ -11,7 +11,7 @@
 Extended Resizing Layers
 ========================
 
-.. autoclass:: neuralnet_pytorch.resizing.Upsample
+.. autoclass:: neuralnet_pytorch.resizing.Interpolate
 .. autoclass:: neuralnet_pytorch.resizing.AvgPool2d
 .. autoclass:: neuralnet_pytorch.resizing.MaxPool2d
 

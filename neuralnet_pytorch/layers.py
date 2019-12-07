@@ -44,10 +44,10 @@ class Net:
         a dictionary that contains the optimizer and scheduler for optimization.
     stats
         a dictionary to hold the interested statistics from training and evaluation.
-        For each ```train``` and ```eval``` keys, an other dictionary with several
+        For each ``'train'`` and ``'eval'`` keys, an other dictionary with several
         built-in keys.
-        The possible keys are: ```scalars```, ```images```, ```histograms```,
-        and  ```pointclouds```.
+        The possible keys are: ``'scalars'``, ``'images'``, ``'histograms'``,
+        and  ``'pointclouds'``.
     """
 
     def __init__(self, *args, **kwargs):
@@ -212,7 +212,7 @@ class Module(nn.Module, _LayerMethod):
 
 
 @utils.add_simple_repr
-class MultiSingleInputModule(nn.Module, _LayerMethod):
+class MultiSingleInputModule(Module):
     """
     This is an abstract class.
     This class computes the results of multiple modules given an input tensor,
@@ -250,12 +250,14 @@ class MultiSingleInputModule(nn.Module, _LayerMethod):
         self.input_shape = tuple(self.input_shape)
 
     def forward(self, input, *args, **kwargs):
-        outputs = [module(input) for name, module in self.named_children()]
+        outputs = [module(input, *args, **kwargs) for name, module in self.named_children()]
         return tuple(outputs)
 
+    @property
     def trainable(self):
         return tuple()
 
+    @property
     def params(self):
         return tuple()
 
@@ -274,9 +276,35 @@ class MultiMultiInputModule(MultiSingleInputModule):
 
     def forward(self, *input, **kwargs):
         input_it = iter(input)
-        outputs = [module(next(input_it)) if name.startswith('module') else module()
+        outputs = [module(next(input_it), **kwargs) if name.startswith('module') else module()
                    for name, module in self.named_children()]
         return tuple(outputs)
+
+
+class SingleMultiInputModule(Module):
+    def __init__(self, module):
+        super().__init__(module.output_shape)
+        self.module = module
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        return self.module.output_shape
+
+    def forward(self, *input, **kwargs):
+        return tuple([self.module(inp, **kwargs) for inp in input])
+
+    @property
+    def trainable(self):
+        return tuple()
+
+    @property
+    def params(self):
+        return tuple()
+
+    @property
+    def regularizable(self):
+        return tuple()
 
 
 @utils.add_simple_repr
@@ -298,6 +326,14 @@ class Sequential(nn.Sequential, _LayerMethod):
     def __init__(self, *args, input_shape=None):
         super().__init__(*args)
         self.input_shape = input_shape
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            start = idx.start if idx.start else 0
+            modules = list(self._modules.items())
+            return Sequential(OrderedDict(modules[idx]), input_shape=modules[start][1].input_shape)
+        else:
+            return self._get_item_by_idx(self._modules.values(), idx)
 
     def forward(self, input, *args, **kwargs):
         for module in self._modules.values():
@@ -501,9 +537,9 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         stride of the convolution. Default: 1.
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     groups : int
@@ -549,7 +585,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             else:
                 raise NotImplementedError
         elif isinstance(padding, int):
-            pass
+            padding = _pair(padding)
         else:
             raise ValueError('padding must be a str/tuple/int, got %s' % type(padding))
 
@@ -560,10 +596,12 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
-        pad = nn.ReflectionPad2d((self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)) \
-            if self.border_mode == 'ref' \
-            else nn.ReplicationPad2d((self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)) \
-            if self.border_mode == 'rep' else lambda x: x
+        if self.border_mode in ('ref', 'rep'):
+            padding = (self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)
+            pad = nn.ReflectionPad2d(padding) if self.border_mode == 'ref' else nn.ReplicationPad2d(padding)
+        else:
+            pad = lambda x: x
+
         input = pad(input)
         input = self.activation(super().forward(input))
         return input
@@ -611,9 +649,9 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
     padding
         ``dilation * (kernel_size - 1) - padding`` zero-padding
         will be added to both sides of each dimension in the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep``` which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'`` which are common padding schemes.
+        Default: ``'half'``.
     output_padding
         additional size added to one side of each dimension in the output shape. Default: 0
     groups : int
@@ -677,7 +715,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
         if self.output_size is not None:
             assert len(self.output_size) == 2, \
                 'output_size should have exactly 2 elements, got %d' % len(self.output_size)
-            return (self.input_shape[0], self.out_channels) + self.output_size
+            return (self.input_shape[0], self.out_channels) + tuple(self.output_size)
 
         shape = [np.nan if s is None else s for s in self.input_shape]
         _, _, h_in, w_in = shape
@@ -860,9 +898,9 @@ class ConvNormAct(Sequential):
         stride of the convolution. Default: 1.
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     groups : int
@@ -896,8 +934,8 @@ class ConvNormAct(Sequential):
     no_scale: bool
         whether to use a trainable scale parameter. Default: ``True``.
     norm_method
-        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
-        Default: ```bn```.
+        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        Default: ``'bn'``.
     kwargs
         extra keyword arguments to pass to activation.
     """
@@ -992,8 +1030,8 @@ class FCNormAct(Sequential):
     no_scale: bool
         whether to use a trainable scale parameter. Default: ``True``.
     norm_method
-        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
-        Default: ```bn```.
+        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        Default: ``'bn'``.
     kwargs
         extra keyword arguments to pass to activation.
     """
@@ -1051,9 +1089,9 @@ class ResNetBasicBlock(Module):
         stride of the convolution. Default: 1.
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     activation
@@ -1072,8 +1110,8 @@ class ResNetBasicBlock(Module):
     weights_init
         a kernel initialization method from :mod:`torch.nn.init`.
     norm_method
-        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
-        Default: ```bn```.
+        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        Default: ``'bn'``.
     kwargs
         extra keyword arguments to pass to activation.
 
@@ -1176,9 +1214,9 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
         stride of the convolution. Default: 1.
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     activation
@@ -1197,8 +1235,8 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
     weights_init
         a kernel initialization method from :mod:`torch.nn.init`.
     norm_method
-        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
-        Default: ```bn```.
+        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        Default: ``'bn'``.
     kwargs
         extra keyword arguments to pass to activation.
 
@@ -1239,9 +1277,9 @@ class StackingConv(Sequential):
         stride of the convolution. Default: 1.
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     bias : bool
@@ -1256,8 +1294,8 @@ class StackingConv(Sequential):
     bias_init
         a bias initialization method from :mod:`torch.nn.init`.
     norm_method
-        normalization method to be used. Choices are ```bn```, ```in```, and ```ln```.
-        Default: ```bn```.
+        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        Default: ``'bn'``.
     groups : int
         number of blocked connections from input channels to output channels. Default: 1.
     kwargs
@@ -1429,9 +1467,9 @@ class DepthwiseSepConv2D(Sequential):
         depth multiplier for intermediate result of depthwise convolution
     padding
         zero-padding added to both sides of the input.
-        Besides tuple/list/integer, it accepts ``str`` such as ```half``` and ```valid```,
-        which is similar the Theano, and ```ref``` and ```rep```, which are common padding schemes.
-        Default: ```half```.
+        Besides tuple/list/integer, it accepts ``str`` such as ``'half'`` and ``'valid'``,
+        which is similar the Theano, and ``'ref'`` and ``'rep'``, which are common padding schemes.
+        Default: ``'half'``.
     dilation
         spacing between kernel elements. Default: 1.
     bias : bool
@@ -1445,8 +1483,8 @@ class DepthwiseSepConv2D(Sequential):
         extra keyword arguments to pass to activation.
     """
 
-    def __init__(self, input_shape, out_channels, kernel_size, depth_mul, padding='half', dilation=1, bias=True,
-                 activation=None, **kwargs):
+    def __init__(self, input_shape, out_channels, kernel_size, depth_mul=1, stride=1, padding='half', dilation=1,
+                 bias=True, activation=None, **kwargs):
         input_shape = _image_shape(input_shape)
 
         super().__init__(input_shape=input_shape)
@@ -1456,10 +1494,10 @@ class DepthwiseSepConv2D(Sequential):
         self.padding = padding
         self.dilation = dilation
         self.activation = nnt.function(activation, **kwargs)
-        self.add_module('depthwise', Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, padding=padding,
-                                            dilation=dilation, groups=input_shape[1], bias=bias))
-        self.add_module('pointwise', Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
-                                            dilation=dilation, bias=False, **kwargs))
+        self.depthwise = Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, stride=stride,
+                                padding=padding, dilation=dilation, groups=input_shape[1], bias=bias)
+        self.pointwise = Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
+                                dilation=dilation, bias=False, **kwargs)
 
     def extra_repr(self):
         s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'

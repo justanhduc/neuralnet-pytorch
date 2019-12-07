@@ -67,11 +67,11 @@ def track(name, x, direction=None):
 
         ``None``: tracks only value.
 
-        ```forward```: tracks only value.
+        ``'forward'``: tracks only value.
 
-        ```backward```: tracks only gradient.
+        ``'backward'``: tracks only gradient.
 
-        ```all``: tracks both value and gradient.
+        ``'all'``: tracks both value and gradient.
 
         Default: ``None``.
     :return: `x`.
@@ -249,7 +249,9 @@ class Monitor:
         self.print_freq = print_freq
         self.num_iters = num_iters
         if current_folder:
-            self.current_folder = current_folder
+            self.current_folder = os.path.normpath(current_folder)
+            self.current_run = os.path.basename(self.current_folder)
+
             try:
                 log = self.read_log('log.pkl')
                 try:
@@ -355,7 +357,8 @@ class Monitor:
             indices = sorted([int(r[len(self._prefix):]) for r in runs])
             idx = indices[-1] + 1
 
-        return os.path.join(self.path, '{}{}'.format(self._prefix, idx))
+        self.current_run = '{}{}'.format(self._prefix, idx)
+        return os.path.join(self.path, self.current_run)
 
     def iter_epoch(self, iterator):
         """
@@ -563,12 +566,12 @@ class Monitor:
         :param option:
             there are two options which should be passed as a ``str``.
 
-            ```last_only```: plot the histogram of the last recorded tensor only.
+            ``'latest_only'``: plot the histogram of the last recorded tensor only.
 
-            ```n_bins```: number of bins of the histogram.
+            ``'n_bins'``: number of bins of the histogram.
         :param value:
-            value of the chosen option. Should be ``True``/``False`` for ```last_only```
-            and an integer for ```n_bins```.
+            value of the chosen option. Should be ``True``/``False`` for ``'latest_only'``
+            and an integer for ``'n_bins'``.
         :return: ``None``.
         """
 
@@ -749,18 +752,20 @@ class Monitor:
             outfile.write(str(obj))
             outfile.close()
 
-    def dump_model(self, network, *args, **kwargs):
+    def dump_model(self, network, use_tensorboard=False, *args, **kwargs):
         """
         saves a string representation of the given neural net.
 
         :param network:
             neural net to be saved as string representation.
+        :param use_tensorboard:
+            use tensorboard to save `network`'s graph.
         :param args:
             additional arguments to Tensorboard's :meth:`SummaryWriter`
-            when :attr:`~use_tensorboard` is ``True``.
+            when `use_tensorboard` is ``True``.
         :param kwargs:
             additional keyword arguments to Tensorboard's :meth:`SummaryWriter`
-            when :attr:`~use_tensorboard` is ``True``.
+            when `~se_tensorboard` is ``True``.
         :return: ``None``.
         """
 
@@ -768,6 +773,8 @@ class Monitor:
             nn.Module, nn.Sequential)), 'network must be an instance of Module or Sequential, got {}'.format(
             type(network))
         self.dump_rep('network.txt', network)
+        if use_tensorboard:
+            self.writer.add_graph(network, *args, **kwargs)
 
     def backup(self, files):
         """
@@ -821,7 +828,7 @@ class Monitor:
         if self.use_tensorboard:
             self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self.iter)
 
-    def scatter(self, name: str, value, latest=False):
+    def scatter(self, name: str, value, latest_only=False):
         """
         schedules a scattor plot of (a batch of) points.
         A 3D :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -836,14 +843,14 @@ class Monitor:
         """
 
         if self.iter == 0:
-            self._options[name]['last_only'] = latest
+            self._options[name]['latest_only'] = latest_only
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
         self._points_since_last_flush[name][self.iter] = value
 
-    def imwrite(self, name: str, value, latest=False):
+    def imwrite(self, name: str, value, latest_only=False):
         """
         schedules to save images.
         The images will be rendered and saved every :attr:`~print_freq` iterations.
@@ -862,7 +869,7 @@ class Monitor:
         """
 
         if self.iter == 0:
-            self._options[name]['last_only'] = latest
+            self._options[name]['latest_only'] = latest_only
 
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
@@ -872,7 +879,7 @@ class Monitor:
             for idx, img in enumerate(value):
                 self.writer.add_image('image/' + name.replace(' ', '-') + '-%d' % idx, img, self.iter)
 
-    def hist(self, name, value, n_bins=20, latest=False):
+    def hist(self, name, value, n_bins=20, latest_only=False):
         """
         schedules a histogram plot of (a batch of) points.
         A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -892,7 +899,7 @@ class Monitor:
             value = utils.to_numpy(value)
 
         if self.iter == 0:
-            self._options[name]['last_only'] = latest
+            self._options[name]['latest_only'] = latest_only
             self._options[name]['n_bins'] = n_bins
 
         self._hist_since_last_flush[name][self.iter] = value
@@ -957,7 +964,7 @@ class Monitor:
 
         # save recorded images
         for name, val in list(_img_since_last_flush.items()):
-            latest = self._options[name].get('last_only')
+            latest = self._options[name].get('latest_only')
 
             for itt, val in val.items():
                 if val.dtype != 'uint8':
@@ -1013,7 +1020,7 @@ class Monitor:
                 self.writer.add_histogram(name, np.array(val[k]).flatten(), global_step=k)
 
             n_bins = self._options[name].get('n_bins', 20)
-            latest = self._options[name].get('last_only', False)
+            latest = self._options[name].get('latest_only', False)
 
             if latest:
                 k = max(list(_hist_since_last_flush[name].keys()))
@@ -1038,7 +1045,7 @@ class Monitor:
 
         # scatter pointcloud(s)
         for name, vals in list(_pointcloud_since_last_flush.items()):
-            latest = self._options[name].get('last_only')
+            latest = self._options[name].get('latest_only')
             for itt, val in vals.items():
                 if len(val.shape) == 2:
                     ax = fig.add_subplot(111, projection='3d')
@@ -1086,7 +1093,7 @@ class Monitor:
         elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
                                        else elapsed_time / 3600.) + time_unit
         now = dt.now().strftime("%d/%m/%Y %H:%M:%S")
-        log = '{} Elapsed time {}\t{}\t{}'.format(now, elapsed_time, iter_show, '\t'.join(prints))
+        log = '{} Elapsed time {} {}\t{}\t{}'.format(now, elapsed_time, self.current_run, iter_show, '\t'.join(prints))
         print(log)
 
         if self.send_slack:
@@ -1153,13 +1160,13 @@ class Monitor:
             If ``callable``, it should be a custom method to dump object.
             There are 3 types of ``str``.
 
-            ```pickle```: use :func:`pickle.dump` to store object.
+            ``'pickle'``: use :func:`pickle.dump` to store object.
 
-            ```torch```: use :func:`torch.save` to store object.
+            ``'torch'``: use :func:`torch.save` to store object.
 
-            ```txt```: use :func:`numpy.savetxt` to store object.
+            ``'txt'``: use :func:`numpy.savetxt` to store object.
 
-            Default: ```pickle```.
+            Default: ``'pickle'``.
         :param keep:
             the number of versions of the saved file to keep.
             Default: -1 (keeps only the latest version).
@@ -1185,13 +1192,13 @@ class Monitor:
             If ``callable``, it should be a custom method to load object.
             There are 3 types of ``str``.
 
-            ```pickle```: use :func:`pickle.dump` to store object.
+            ``'pickle'``: use :func:`pickle.dump` to store object.
 
-            ```torch```: use :func:`torch.save` to store object.
+            ``'torch'``: use :func:`torch.save` to store object.
 
-            ```txt```: use :func:`numpy.savetxt` to store object.
+            ``'txt'``: use :func:`numpy.savetxt` to store object.
 
-            Default: ```pickle```.
+            Default: ``'pickle'``.
         :param version:
             the version of the saved file to load.
             Default: -1 (loads the latest version of the saved file).

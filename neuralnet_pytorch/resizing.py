@@ -2,50 +2,59 @@ import numpy as np
 import torch as T
 from torch import nn
 from torch.nn import functional as F
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _ntuple
 
 from neuralnet_pytorch import utils
 from neuralnet_pytorch.utils import _image_shape
 from neuralnet_pytorch.layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 
-__all__ = ['Upsample', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D',
+__all__ = ['Interpolate', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D',
            'ConcurrentCat', 'SequentialCat']
 
 
-@utils.add_simple_repr
-class Upsample(nn.Upsample, _LayerMethod):
+@utils.add_custom_repr
+class Interpolate(Module):
     """
-    Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
+    Down/Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
     Parameters
     ----------
     size
-        output spatial sizes. Optional.
+        output spatial sizes. Mutually exclusive with :attr:`scale_factor`.
     scale_factor
-        multiplier for spatial size. Has to match input size if it is a tuple. Optional.
+        float or tuple of floats.
+        Multiplier for spatial size. Has to match input size if it is a tuple.
+        Mutually exclusive with :attr:`size`.
     mode
-        the upsampling algorithm: one of ``'nearest'``,
-        ``'linear'``, ``'bilinear'``, ``'bicubic'`` and ``'trilinear'``.
+        talgorithm used for upsampling:
+        ``'nearest'``, ``'linear'``, ``'bilinear'``,
+        ``'bicubic'``, ``'trilinear'``, and ``'area'``.
         Default: ``'nearest'``.
     align_corners
         if ``True``, the corner pixels of the input
         and output tensors are aligned, and thus preserving the values at
-        those pixels. This only has effect when `mode` is
+        those pixels.
+        If ``False``, the input and output tensors are aligned by the corner
+        points of their corner pixels, and the interpolation uses edge value padding
+        for out-of-boundary values, making this operation *independent* of input size
+        when :attr:`scale_factor` is kept the same.
+        This only has effect when `mode` is
         ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``.
     input_shape
         shape of the input tensor. Optional.
     """
 
-    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=False, input_shape=None):
-        assert isinstance(scale_factor, (int, list, tuple)), 'scale_factor must be an int, a list or a tuple. ' \
-                                                             'Received %s.' % type(scale_factor)
+    def __init__(self, size=None, scale_factor=None, mode='bilinear', align_corners=None, input_shape=None):
+        assert size is not None or scale_factor is not None, 'size and scale_factor cannot be not None'
+        super().__init__(input_shape)
 
-        self.input_shape = input_shape
-        scale_factor = _pair(scale_factor)
-        super().__init__(size, scale_factor, mode, align_corners)
+        self.size = size
+        self.scale_factor = scale_factor
+        self.mode = mode
+        self.align_corners = align_corners
 
     def forward(self, input: T.Tensor, *args, **kwargs):
-        return super().forward(input)
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     @property
     @utils.validate
@@ -53,13 +62,36 @@ class Upsample(nn.Upsample, _LayerMethod):
         if self.input_shape is None:
             return None
 
+        scale_factor = _ntuple(len(self.input_shape) - 2)(self.scale_factor)
         shape = [np.nan if s is None else s for s in self.input_shape]
-        return (shape[:2] + self.new_shape) if self.size \
-            else shape[:2] + [shape[i + 2] * self.scale_factor[i] for i in range(len(self.scale_factor))]
+        return (tuple(shape[:2]) + tuple(self.size)) if self.size \
+            else shape[:2] + [shape[i + 2] * scale_factor[i] for i in range(len(scale_factor))]
+
+    def extra_repr(self):
+        s = 'size={size}, scale_factor={scale_factor}, mode={mode}, align_corners={align_corners}, ' \
+            'input_shape={input_shape}'
+        s = s.format(**self.__dict__)
+        return s
+
+
+class _Pool2d(_LayerMethod):
+
+    @property
+    @utils.validate
+    def output_shape(self):
+        if all(self.input_shape) is None:
+            return tuple(self.input_shape)
+
+        integize = np.ceil if self.ceil_mode else np.floor
+        shape = [np.nan if x is None else x for x in self.input_shape]
+        ks = [1 + (fs - 1) * d for fs, d in zip(self.kernel_size, self.dilation)]
+        shape[2] = integize((shape[2] + 2 * self.padding[0] - ks[0]) / self.stride[0] + 1)
+        shape[3] = integize((shape[3] + 2 * self.padding[1] - ks[1]) / self.stride[1] + 1)
+        return shape
 
 
 @utils.add_simple_repr
-class AvgPool2d(nn.AvgPool2d, _LayerMethod):
+class AvgPool2d(nn.AvgPool2d, _Pool2d):
     """
     Applies a 2D average pooling over an input signal composed of several input
     planes.
@@ -86,36 +118,16 @@ class AvgPool2d(nn.AvgPool2d, _LayerMethod):
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
         stride = kernel_size if stride is None else (stride, stride) if isinstance(stride, int) else tuple(stride)
         padding = (padding, padding) if isinstance(padding, int) else tuple(padding)
+        self.dilation = (1, 1)
         super().__init__(kernel_size, stride=stride, padding=padding, ceil_mode=ceil_mode,
                          count_include_pad=count_include_pad)
 
     def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
 
-    @property
-    @utils.validate
-    def output_shape(self):
-        if all(self.input_shape) is None:
-            return tuple(self.input_shape)
-
-        shape = [np.nan if x is None else x for x in self.input_shape]
-        shape[2] = (shape[2] + 2 * self.padding[0] - self.kernel_size[0]) // self.stride[0] + 1
-        shape[3] = (shape[3] + 2 * self.padding[1] - self.kernel_size[1]) // self.stride[1] + 1
-
-        rem_h = np.mod(shape[2], self.stride[0])
-        if rem_h and not np.isnan(rem_h):
-            if self.ceil_mode:
-                shape[2] += np.mod(shape[2], self.stride[0])
-
-        rem_w = np.mod(shape[3], self.stride[1])
-        if rem_w and not np.isnan(rem_w):
-            if self.ceil_mode:
-                shape[3] += np.mod(shape[3], self.stride[1])
-        return tuple(shape)
-
 
 @utils.add_simple_repr
-class MaxPool2d(nn.MaxPool2d, _LayerMethod):
+class MaxPool2d(nn.MaxPool2d, _Pool2d):
     """
     Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -152,28 +164,6 @@ class MaxPool2d(nn.MaxPool2d, _LayerMethod):
 
     def forward(self, input: T.Tensor, *args, **kwargs):
         return super().forward(input)
-
-    @property
-    @utils.validate
-    def output_shape(self):
-        if all(self.input_shape) is None:
-            return tuple(self.input_shape)
-
-        shape = [np.nan if x is None else x for x in self.input_shape]
-        ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(self.kernel_size, self.dilation)]
-        shape[2] = (shape[2] + 2 * self.padding[0] - ks[0]) // self.stride[0] + 1
-        shape[3] = (shape[3] + 2 * self.padding[1] - ks[1]) // self.stride[1] + 1
-
-        rem_h = np.mod(shape[2], self.stride[0])
-        if rem_h and not np.isnan(rem_h):
-            if self.ceil_mode:
-                shape[2] += np.mod(shape[2], self.stride[0])
-
-        rem_w = np.mod(shape[3], self.stride[1])
-        if rem_w and not np.isnan(rem_w):
-            if self.ceil_mode:
-                shape[3] += np.mod(shape[3], self.stride[1])
-        return tuple(shape)
 
 
 @utils.add_custom_repr
