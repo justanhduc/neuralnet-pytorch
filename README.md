@@ -62,6 +62,16 @@ Theano folks will also find some reminiscence as many functions are highly inspi
 
 [Gin-config](https://github.com/google/gin-config) (optional)
 
+[Pykeops](https://github.com/getkeops/keops) 
+(optional, required for the calculation of Sinkhorn Wasserstein loss.)
+
+[Geomloss](https://github.com/jeanfeydy/geomloss) 
+(optional, required for the calculation of Sinkhorn Wasserstein loss.)
+
+# Documentation
+
+https://neuralnet-pytorch.readthedocs.io
+
 # Installation
 
 Stable version
@@ -69,11 +79,18 @@ Stable version
 pip install --upgrade neuralnet-pytorch
 ```
 
-Bleeding-edge version
+Bleeding-edge version (recommended)
 
 ```
 pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
 ```
+
+To install the package with optional dependencies, try
+
+```
+pip install "neuralnet-pytorch[option] @ git+git://github.com/justanhduc/neuralnet-pytorch.git@master"
+```
+in which `option` can be `gin` and/or `emd`.
 
 To install the version with some collected Cuda/C++ ops, use
 

@@ -48,7 +48,11 @@ def setup_package():
         packages=find_packages(exclude=['docs']),
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
-                          'imageio', 'gin-config', 'future', 'tensorboardX'],
+                          'imageio', 'future', 'tensorboardX'],
+        extras_require={
+            'gin': ['gin-config'],
+            'emd': ['pykeops', 'geomloss']
+        },
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',
             'Source': 'https://github.com/justanhduc/neuralnet-pytorch',
