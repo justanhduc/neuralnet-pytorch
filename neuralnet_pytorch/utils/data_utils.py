@@ -175,6 +175,20 @@ class DataPrefetcher:
         a function to preprocess each batch in GPU.
         Default: ``None``.
 
+    Examples
+    --------
+    This prefetcher can be added seamlessly to the current code pipeline.
+
+    .. code-block:: python
+
+        from torch.utils.data import DataLoader
+        import neuralnet_pytorch as nnt
+
+        ...
+        loader = DataLoader(dataset, ...)
+        loader = nnt.DataPrefetcher(loader)
+        ...
+
     Attributes
     ----------
     next_data

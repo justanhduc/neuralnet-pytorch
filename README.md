@@ -102,3 +102,5 @@ The AdaBound optimizer is taken from its [official repo](https://github.com/Luol
 The adapted Gin for Pytorch code is taken from [Gin-config](https://github.com/google/gin-config).
 
 The monitor scheme is inspired from [WGAN](https://github.com/igul222/improved_wgan_training).
+
+The EMD CUDA implementation is adapted form [here](https://github.com/daerduoCarey/PyTorchEMD).
