@@ -7,3 +7,5 @@ imageio
 gin-config
 future
 tensorboardX
+pykeops[optional]
+geomloss[optional]

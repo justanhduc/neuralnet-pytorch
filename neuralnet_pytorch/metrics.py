@@ -125,7 +125,7 @@ def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=True):
     return loss_1 + loss_2
 
 
-def emd_loss(xyz1, xyz2, reduce='mean'):
+def emd_loss(xyz1, xyz2, reduce='mean', sinkhorn=True):
     """
     Calculates the Earth Mover Distance (or Wasserstein metric) between two sets
     of points.
@@ -136,13 +136,23 @@ def emd_loss(xyz1, xyz2, reduce='mean'):
         a point cloud of shape (b, n2, k) or (n2, k).
     :param reduce:
         ``'mean'`` or ``'sum'``. Default: ``'mean'``.
+    :param sinkhorn:
+        whether to use the Sinkhorn approximation of the Wasserstein distance.
+        ``False`` will fall back to a CUDA implementation, which is only available
+        if the CUDA-extended neuralnet-pytorch is installed.
+        Default: ``True``.
     :return:
         the EMD between the inputs.
     """
 
     assert reduce in ('mean', 'sum'), 'Reduce method should be mean or sum'
-    emd_dist = (emd(xyz1, xyz2) + emd(xyz2, xyz1)) / 2.
-    return T.mean(emd_dist) if reduce == 'mean' else T.sum(emd_dist)
+    if sinkhorn:
+        import geomloss
+        return geomloss.SamplesLoss()(xyz1, xyz2)
+    else:
+        from .extensions import earth_mover_distance as emd
+        emd_dist = (emd(xyz1, xyz2) + emd(xyz2, xyz1)) / 2.
+        return T.mean(emd_dist) if reduce == 'mean' else T.sum(emd_dist)
 
 
 def _fspecial_gauss(size, sigma):
