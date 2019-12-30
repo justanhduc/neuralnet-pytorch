@@ -16,7 +16,17 @@ config.external_configurable(optim.ASGD, 'asgd', module='T.optim')
 config.external_configurable(optim.LBFGS, 'lbfgs', module='T.optim')
 config.external_configurable(optim.RMSprop, 'rmsprop', module='T.optim')
 config.external_configurable(optim.Rprop, 'rprop', module='T.optim')
-config.external_configurable(nnt.AdaBound, 'adabound')
+config.external_configurable(nnt.AdaBound, 'adabound', module='nnt')
+
+try:
+    import apex
+    config.external_configurable(apex.optimizers.FusedAdam, 'fusedadam', module='apex.optimizers')
+    config.external_configurable(apex.optimizers.FusedSGD, 'fusedsgd', module='apex.optimizers')
+    config.external_configurable(apex.optimizers.FusedNovoGrad, 'fusednovograd', module='apex.optimizers')
+    config.external_configurable(apex.optimizers.FusedLAMB, 'fusedlamb', module='apex.optimizers')
+    print('Apex Fused Optimizers is availble for GIN')
+except ImportError:
+    pass
 
 # lr scheduler
 config.external_configurable(optim.lr_scheduler.LambdaLR, 'lambda_lr', module='T.optim.lr_scheduler')

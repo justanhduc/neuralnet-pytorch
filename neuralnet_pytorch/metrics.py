@@ -3,8 +3,8 @@ import torch.nn.functional as F
 import numpy as np
 import torch.nn as nn
 
-import neuralnet_pytorch as nnt
-from neuralnet_pytorch import utils
+from . import layers
+from . import utils
 
 __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'tv_reg', 'spectral_norm']
 
@@ -79,7 +79,7 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return reduce(T.abs(x - y) ** p)
 
 
-def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
+def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=False):
     """
     Calculates the Chamfer distance between two batches of point clouds.
     The Pytorch code is adapted from DenseLidarNet_.
@@ -89,17 +89,24 @@ def chamfer_loss(xyz1, xyz2, reduce='sum', c_code=False):
     .. _AtlasNet: https://github.com/ThibaultGROUEIX/AtlasNet/tree/master/extension
 
     :param xyz1:
-        a point cloud of shape (b, n1, k).
+        a point cloud of shape ``(b, n1, k)`` or ``(n1, k)``.
     :param xyz2:
-        a point cloud of shape (b, n2, k).
+        a point cloud of shape (b, n2, k) or (n2, k).
     :param reduce:
-        ``'mean'`` or ``'sum'``. Default: ``'sum'``.
+        ``'mean'`` or ``'sum'``. Default: ``'mean'``.
     :param c_code:
         whether to use CUDA implementation.
         This version is much more memory-friendly and slightly faster.
     :return:
         the Chamfer distance between the inputs.
     """
+    assert len(xyz1.shape) in (2, 3) and len(xyz2.shape) in (2, 3), 'Unknown shape of tensors'
+
+    if xyz1.dim() == 2:
+        xyz1 = xyz1.unsqueeze(0)
+
+    if xyz2.dim() == 2:
+        xyz2 = xyz2.unsqueeze(0)
 
     assert reduce in ('mean', 'sum'), 'Unknown reduce method'
     reduce = T.sum if reduce == 'sum' else T.mean
@@ -248,7 +255,7 @@ def spectral_norm(module, name='weight', n_power_iterations=1, eps=1e-12, dim=No
 
     if hasattr(module, 'weight'):
         if dim is None:
-            dim = 1 if isinstance(module, nnt.ConvTranspose2d) else 0
+            dim = 1 if isinstance(module, layers.ConvTranspose2d) else 0
 
         if not isinstance(module, (nn.modules.batchnorm._BatchNorm,
                                    nn.GroupNorm,

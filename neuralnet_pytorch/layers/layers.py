@@ -6,15 +6,14 @@ import torch as T
 import torch.nn as nn
 from torch.nn.modules.utils import _pair
 
-import neuralnet_pytorch as nnt
-from neuralnet_pytorch import utils
-from neuralnet_pytorch.utils import _image_shape, _matrix_shape, _pointset_shape
-from neuralnet_pytorch.utils import cuda_available
+from .. import utils
+from ..utils import _image_shape, _matrix_shape, _pointset_shape
+from ..utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
            'GraphConv', 'MultiSingleInputModule', 'MultiMultiInputModule', 'SequentialSum', 'ConcurrentSum',
-           'Net', 'DepthwiseSepConv2D', 'FCNormAct', 'BatchGraphConv', 'GraphXConv']
+           'Net', 'DepthwiseSepConv2D', 'FCNormAct', 'BatchGraphConv', 'GraphXConv', 'SingleMultiInputModule']
 
 
 class Net:
@@ -196,7 +195,7 @@ class _LayerMethod:
 class Module(nn.Module, _LayerMethod):
     """
     Similar to :class:`torch.nn.Module`, but extended by
-    :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
     All the usages in native Pytorch are preserved.
 
     Parameters
@@ -311,7 +310,7 @@ class SingleMultiInputModule(Module):
 class Sequential(nn.Sequential, _LayerMethod):
     """
     Similar to :class:`torch.nn.Sequential`, but extended by
-    :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
     All the usages in native Pytorch are preserved.
 
     Parameters
@@ -354,12 +353,10 @@ class Sequential(nn.Sequential, _LayerMethod):
             m.reset_parameters()
 
 
-def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwargs):
+def wrapper(input_shape=None, output_shape=None, *args, **kwargs):
     """
     A class decorator to wrap any :mod:`torch` module.
 
-    :param module:
-        a :mod:`torch` module.
     :param input_shape:
         shape of the input to the module.
         Can be ``None``.
@@ -371,7 +368,7 @@ def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwa
     :param kwargs:
         extra keyword arguments needed by the module.
     :return:
-        The input module extended by :class:`_LayerMethod`.
+        The input module extended by :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
 
     Examples
     --------
@@ -379,7 +376,7 @@ def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwa
 
     >>> import torch.nn as nn
     >>> import neuralnet_pytorch as nnt
-    >>> dropout = nnt.wrapper(nn.Dropout2d, p=.2)() # because wrapper returns a class!
+    >>> dropout = nnt.wrapper(p=.2)(nn.Dropout2d)() # because wrapper returns a class!
 
     Alternatively, you can use it as a decorator
 
@@ -388,52 +385,59 @@ def wrapper(module: nn.Module, input_shape=None, output_shape=None, *args, **kwa
         import torch.nn as nn
         import neuralnet_pytorch as nnt
 
-        @nnt.wrapper
+        @nnt.wrapper(# optional arguments for input and output shapes)
         class Foo(nn.Module):
             ...
 
         foo = Foo()
     """
+    assert input_shape is None or isinstance(input_shape, (int, list, tuple)), 'Unknown type of input_shape'
+    if isinstance(input_shape, int):
+        input_shape = (input_shape,)
 
-    assert issubclass(module, nn.Module), 'module must be a subclass of Pytorch\'s Module'
+    def decorator(module: nn.Module):
+        assert issubclass(module, nn.Module), 'module must be a subclass of Pytorch\'s Module'
 
-    @utils.add_simple_repr
-    class _Wrapper(module, _LayerMethod):
-        def __init__(self):
-            self.input_shape = input_shape
-            self.output_shape_tmp = output_shape
-            device = kwargs.pop('device', None)
+        @utils.add_simple_repr
+        class _Wrapper(module, _LayerMethod):
+            def __init__(self):
+                self.input_shape = input_shape
+                self.output_shape_tmp = output_shape
+                device = kwargs.pop('device', None)
 
-            super().__init__(*args, **kwargs)
-            if cuda_available:
-                self.cuda(device)
-
-        def forward(self, input, *args, **kwargs):
-            return super().forward(input, *args, **kwargs)
-
-        @property
-        @utils.validate
-        def output_shape(self):
-            if self.input_shape is None:
-                return None
-
-            if self.output_shape_tmp:
-                return self.output_shape_tmp
-            else:
-                none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
-                shape = [1 if s is None else s for s in self.input_shape]
-                dummy = T.zeros(*shape)
+                super().__init__(*args, **kwargs)
                 if cuda_available:
-                    dummy.cuda()
+                    self.cuda(device)
 
-                dummy = self(dummy)
-                output_shape = list(dummy.shape)
-                for k in none_indices:
-                    output_shape[k] = None
-                return tuple(output_shape)
+            def forward(self, input, *args, **kwargs):
+                return super().forward(input, *args, **kwargs)
 
-    _Wrapper.__name__ = module.__name__
-    return _Wrapper
+            @property
+            @utils.validate
+            def output_shape(self):
+                if self.input_shape is None and self.output_shape_tmp is None:
+                    return None
+
+                if self.output_shape_tmp is not None:
+                    return self.output_shape_tmp
+                else:
+                    none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
+                    shape = [1 if s is None else s for s in self.input_shape]
+                    dummy = T.zeros(*shape)
+                    if cuda_available:
+                        dummy.cuda()
+
+                    dummy = self(dummy)
+                    output_shape = list(dummy.shape)
+                    for k in none_indices:
+                        output_shape[k] = None
+                    return tuple(output_shape)
+
+        _Wrapper.__name__ = module.__name__
+        _Wrapper.__doc__ = module.__doc__
+        _Wrapper.__module__ = module.__module__
+        return _Wrapper
+    return decorator
 
 
 class Lambda(Module):
@@ -496,10 +500,10 @@ class Lambda(Module):
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
+        if self.input_shape is None and self.output_shape_tmp is None:
             return None
 
-        if self.output_shape_tmp:
+        if self.output_shape_tmp is not None:
             return self.output_shape_tmp
         else:
             none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
@@ -521,7 +525,7 @@ class Lambda(Module):
 @utils.add_simple_repr
 class Conv2d(nn.Conv2d, _LayerMethod):
     """
-    Extends :class:`torch.nn.Conv2d` with :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    Extends :class:`torch.nn.Conv2d` with :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
 
     Parameters
     ----------
@@ -567,7 +571,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         self.input_shape = input_shape
         kernel_size = _pair(kernel_size)
         self.no_bias = bias
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.weights_init = weights_init
         self.bias_init = bias_init
         self.border_mode = padding
@@ -632,7 +636,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
 @utils.add_simple_repr
 class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
     """
-    Extends :class:`torch.nn.ConvTranspose2d` with :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    Extends :class:`torch.nn.ConvTranspose2d` with :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
 
     Parameters
     ----------
@@ -682,7 +686,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
         self.input_shape = input_shape
         self.weights_init = weights_init
         self.bias_init = bias_init
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.output_size = _pair(output_size) if output_size is not None else None
 
         kernel_size = _pair(kernel_size)
@@ -742,7 +746,7 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
 class FC(nn.Linear, _LayerMethod):
     """
     AKA fully connected layer in deep learning literature.
-    This class extends :class:`torch.nn.Linear` by :class:`~neuralnet_pytorch.layers._LayerMethod`.
+    This class extends :class:`torch.nn.Linear` by :class:`~neuralnet_pytorch.layers.layers._LayerMethod`.
 
     Parameters
     ----------
@@ -781,7 +785,7 @@ class FC(nn.Linear, _LayerMethod):
         self.bias_init = bias_init
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
 
         super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
 
@@ -866,7 +870,7 @@ class Activation(Module):
 
     def __init__(self, activation='relu', input_shape=None, **kwargs):
         super().__init__(input_shape)
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
 
         if cuda_available:
             self.cuda(kwargs.pop('device', None))
@@ -944,14 +948,14 @@ class ConvNormAct(Sequential):
                  activation='relu', weights_init=None, bias_init=None, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True, no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape=input_shape)
-        from neuralnet_pytorch.normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
+        from neuralnet_pytorch.layers.normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
 
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.padding = padding
         self.stride = stride
         self.dilation = dilation
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.norm_method = norm_method
         self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
                            bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
@@ -1040,19 +1044,19 @@ class FCNormAct(Sequential):
                  flatten=False, keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape=input_shape)
-        from neuralnet_pytorch.normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
+        from neuralnet_pytorch.layers.normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
 
         self.out_features = out_features
         self.flatten = flatten
         self.keepdim = keepdim
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
 
         self.fc = FC(self.input_shape, out_features, bias, weights_init=weights_init, bias_init=bias_init,
                      flatten=flatten, keepdim=keepdim)
 
         norm_method = BatchNorm1d if norm_method == 'bn' else InstanceNorm1d if norm_method == 'in' \
             else LayerNorm if norm_method == 'ln' else FeatureNorm1d if norm_method == 'fn' else norm_method
-        self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
+        self.norm = norm_method(self.fc.output_shape, eps, momentum, affine, track_running_stats,
                                 no_scale=no_scale, activation=self.activation, **kwargs)
 
         if cuda_available:
@@ -1065,7 +1069,7 @@ class FCNormAct(Sequential):
         if not self.keepdim:
             s += 'keepdim={keepdim}'
 
-        s = s.format(**self.conv.__dict__)
+        s = s.format(**self.fc.__dict__)
         s += ', activation={}'.format(self.activation.__name__)
         return s
 
@@ -1134,7 +1138,7 @@ class ResNetBasicBlock(Module):
         self.stride = stride
         self.padding = padding
         self.dilation = _pair(dilation)
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.groups = groups
         self.weights_init = weights_init
         self.norm_method = norm_method
@@ -1313,7 +1317,7 @@ class StackingConv(Sequential):
         self.stride = stride
         self.dilation = dilation
         self.groups = groups
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.num_layers = num_layers
         self.norm_method = norm_method
 
@@ -1493,7 +1497,7 @@ class DepthwiseSepConv2D(Sequential):
         self.depth_mul = depth_mul
         self.padding = padding
         self.dilation = dilation
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.depthwise = Conv2d(self.output_shape, input_shape[1] * depth_mul, kernel_size, stride=stride,
                                 padding=padding, dilation=dilation, groups=input_shape[1], bias=bias)
         self.pointwise = Conv2d(self.output_shape, out_channels, 1, activation=activation, padding=padding,
@@ -1556,7 +1560,7 @@ class XConv(Module):
         self.num_neighbors = num_neighbors
         self.out_features = out_features
         self.depth_mul = depth_mul
-        self.activation = nnt.function(activation, **kwargs)
+        self.activation = utils.function(activation, **kwargs)
         self.dropout = dropout
         self.bn = bn
 
@@ -1568,8 +1572,8 @@ class XConv(Module):
         if dropout:
             self.fcs.add_module('dropout2', wrapper(self.output_shape, nn.Dropout2d, p=dropout))
 
-        from neuralnet_pytorch.resizing import DimShuffle
-        from neuralnet_pytorch.normalization import BatchNorm2d
+        from neuralnet_pytorch.layers.resizing import DimShuffle
+        from neuralnet_pytorch.layers.normalization import BatchNorm2d
 
         self.x_trans = Sequential(input_shape=input_shape[:2] + (num_neighbors, input_shape[-1]))
         self.x_trans.add_module('dimshuffle1', DimShuffle(self.x_trans.output_shape, (0, 3, 1, 2)))

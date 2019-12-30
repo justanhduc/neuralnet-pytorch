@@ -44,7 +44,7 @@ Additional Metrics
     metrics
 
 Extras
----------
+------
 .. toctree::
     :maxdepth: 4
 

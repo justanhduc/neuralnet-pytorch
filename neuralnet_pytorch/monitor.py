@@ -14,7 +14,6 @@ import pickle as pkl
 from imageio import imwrite
 import os
 import time
-from datetime import datetime as dt
 import visdom
 from shutil import copyfile
 import torch as T
@@ -25,8 +24,9 @@ try:
 except ImportError:
     from tensorboardX import SummaryWriter
 
-import neuralnet_pytorch as nnt
-from neuralnet_pytorch import utils
+from . import layers
+from . import utils
+from .utils import root_logger, log_formatter, logging
 
 __all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
@@ -257,23 +257,23 @@ class Monitor:
                 try:
                     self.num_stats = log['num']
                 except KeyError:
-                    print('No record found for \'num\'')
+                    root_logger.warning('No record found for \'num\'', exc_info=True)
 
                 try:
                     self.hist_stats = log['hist']
                 except KeyError:
-                    print('No record found for \'hist\'')
+                    root_logger.warning('No record found for \'hist\'', exc_info=True)
 
                 try:
                     self.options = log['options']
                 except KeyError:
-                    print('No record found for \'options\'')
+                    root_logger.warning('No record found for \'options\'', exc_info=True)
 
                 if self.num_iters is None:
                     try:
                         self.num_iters = log['num_iters']
                     except KeyError:
-                        print('No record found for \'num_iters\'')
+                        root_logger.warning('No record found for \'num_iters\'', exc_info=True)
 
                 try:
                     self.epoch = log['epoch']
@@ -281,15 +281,16 @@ class Monitor:
                     if self.num_iters:
                         self.epoch = log['iter'] // self.num_iters
                     else:
-                        print('No record found for \'epoch\'')
+                        root_logger.warning('No record found for \'epoch\'', exc_info=True)
 
                 try:
                     self.iter = self.epoch * self.num_iters if self.num_iters else log['iter']
                 except KeyError:
-                    print('No record found for \'iter\'')
+                    root_logger.warning('No record found for \'iter\'', exc_info=True)
 
             except FileNotFoundError:
-                print('\'log.pkl\' not found in \'%s\'' % os.path.join(self.current_folder, 'files'))
+                root_logger.warning('\'log.pkl\' not found in \'%s\'' % os.path.join(self.current_folder, 'files'),
+                                    exc_info=True)
 
         else:
             self.path = os.path.join(root, model_name)
@@ -299,10 +300,6 @@ class Monitor:
 
         self.use_visdom = use_visdom
         if use_visdom:
-            if kwargs.pop('disable_visdom_logging', True):
-                import logging
-                logging.disable(logging.CRITICAL)
-
             server = kwargs.pop('server', 'http://localhost')
             port = kwargs.pop('port', 8097)
             self.vis = visdom.Visdom(server=server, port=port)
@@ -345,9 +342,17 @@ class Monitor:
         self.hist_folder = os.path.join(self.current_folder, 'histograms')
         os.makedirs(self.hist_folder, exist_ok=True)
 
+        file_handler = logging.FileHandler('{0}/{1}.log'.format(self.file_folder, 'history'))
+        file_handler.setFormatter(log_formatter)
+        root_logger.addHandler(file_handler)
+
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setFormatter(log_formatter)
+        root_logger.addHandler(consoleHandler)
+
         # schedule to flush when the program finishes
         atexit.register(self._atexit)
-        print('Result folder: %s' % self.current_folder)
+        root_logger.info('Result folder: %s' % self.current_folder)
 
     def _get_new_folder(self):
         runs = [folder for folder in os.listdir(self.path) if folder.startswith(self._prefix)]
@@ -375,7 +380,7 @@ class Monitor:
 
         >>> num_epochs = 10
         >>> mon = Monitor(print_freq=1000)
-        >>> for epoch in mon.iter_epoch(range(num_epochs))
+        >>> for epoch in mon.iter_epoch(range(mon.epoch, num_epochs))
         ...     # do something here
 
         See Also
@@ -408,7 +413,7 @@ class Monitor:
         >>> num_epochs = 10
         >>> mon = Monitor(print_freq=1000)
         >>> for epoch in mon.iter_epoch(range(num_epochs)):
-        ...     for data in mon.iter_batch(enumerate(data_loader)):
+        ...     for idx, data in mon.iter_batch(enumerate(data_loader)):
         ...         # do something here
 
         See Also
@@ -432,7 +437,9 @@ class Monitor:
         if self.print_freq:
             if self.iter % self.print_freq == 0:
                 self.flush()
-        self.tick()
+        self.iter += 1
+        if self.num_iters:
+            self.epoch = self.iter // self.num_iters
 
     @property
     def iter(self):
@@ -483,6 +490,8 @@ class Monitor:
 
         assert epoch >= 0, 'Epoch must be non-negative'
         self._last_epoch = int(epoch)
+        if self.num_iters:
+            self.iter = self.epoch * self.num_iters
 
     @property
     def num_stats(self):
@@ -653,8 +662,8 @@ class Monitor:
             print('Training finished!')
         """
 
-        assert isinstance(net, nnt.Net), 'net must be an instance of Net'
-        assert isinstance(net, (nnt.Module, nn.Module, nnt.Sequential, nn.Sequential)), \
+        assert isinstance(net, layers.Net), 'net must be an instance of Net'
+        assert isinstance(net, (layers.Module, nn.Module, layers.Sequential, nn.Sequential)), \
             'net must be an instance of Module or Sequential'
 
         collect = {
@@ -674,7 +683,7 @@ class Monitor:
 
             for it, batch in self.iter_batch(enumerate(train_loader)):
                 net.train(True)
-                if nnt.cuda_available:
+                if utils.cuda_available:
                     batch = utils.batch_to_cuda(batch)
 
                 net.learn(optim, *batch, *args, **kwargs)
@@ -701,13 +710,13 @@ class Monitor:
                             }
 
                             for itt, batch in enumerate(eval_loader):
-                                if nnt.cuda_available:
+                                if utils.cuda_available:
                                     batch = utils.batch_to_cuda(batch)
 
                                 try:
                                     net.eval_procedure(*batch, *args, **kwargs)
                                 except NotImplementedError:
-                                    print('An evaluation procedure must be specified')
+                                    root_logger.exception('An evaluation procedure must be specified')
                                     raise
 
                                 if val_stats_func is None:
@@ -794,22 +803,13 @@ class Monitor:
             try:
                 copyfile(file, '%s/%s' % (self.file_folder, os.path.split(file)[1]))
             except FileNotFoundError:
-                print('No such file or directory: %s' % file)
+                root_logger.warning('No such file or directory: %s' % file)
 
     @utils.deprecated(backup, '1.1.0')
     def copy_files(self, files):
         self.backup(files)
 
-    def tick(self):
-        """
-        increases the iteration counter by 1.
-        Do not call this if using :class:`Monitor`'s context manager mode.
-
-        :return: ``None``.
-        """
-        self.iter += 1
-
-    def plot(self, name: str, value):
+    def plot(self, name: str, value, **kwargs):
         """
         schedules a plot of scalar value.
         A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -818,6 +818,8 @@ class Monitor:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             scalar value to be plotted.
+        :param kwargs:
+            additional options to tensorboard.
         :return: ``None``.
         """
 
@@ -826,9 +828,10 @@ class Monitor:
 
         self._num_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
-            self.writer.add_scalar('data/' + name.replace(' ', '-'), value, self.iter)
+            prefix = kwargs.pop('prefix', 'scalar/')
+            self.writer.add_scalar(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
-    def scatter(self, name: str, value, latest_only=False):
+    def scatter(self, name: str, value, latest_only=False, **kwargs):
         """
         schedules a scattor plot of (a batch of) points.
         A 3D :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -837,8 +840,10 @@ class Monitor:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             2D or 3D tensor to be plotted. The last dim should be 3.
-        :param latest:
+        :param latest_only:
             whether to save only the latest statistics or keep everything from beginning.
+        :param kwargs:
+            additional options to tensorboard.
         :return: ``None``.
         """
 
@@ -848,9 +853,14 @@ class Monitor:
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
-        self._points_since_last_flush[name][self.iter] = value
+        if len(value.shape) == 2:
+            value = value[None]
 
-    def imwrite(self, name: str, value, latest_only=False):
+        self._points_since_last_flush[name][self.iter] = value
+        if self.use_tensorboard:
+            self.writer.add_mesh(name, value, global_step=self.iter, **kwargs)
+
+    def imwrite(self, name: str, value, latest_only=False, **kwargs):
         """
         schedules to save images.
         The images will be rendered and saved every :attr:`~print_freq` iterations.
@@ -858,13 +868,15 @@ class Monitor:
         :param name:
             name of the figure to be saved. Must be unique among plots.
         :param value:
-            3D or 4D tensor to be plotted.
-            The expected shape is (C, H, W) for 3D tensors and
-            (N, C, H, W) for 4D tensors.
+            2D, 3D or 4D tensor to be plotted.
+            The expected shape is (H, W) for 2D tensor, (H, W, C) for 3D tensor and
+            (N, C, H, W) for 4D tensor.
             If the number of channels is other than 3 or 1, each channel is saved as
             a gray image.
-        :param latest:
+        :param latest_only:
             whether to save only the latest statistics or keep everything from beginning.
+        :param kwargs:
+            additional options to tensorboard.
         :return: ``None``.
         """
 
@@ -874,12 +886,21 @@ class Monitor:
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
+        if value.dtype != 'uint8':
+            value = (255.99 * value).astype('uint8')
+
+        if len(value.shape) == 3:
+            value = np.transpose(value, (2, 0, 1))[None]
+        elif len(value.shape) == 2:
+            value = value[None, None]
+
         self._img_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
             for idx, img in enumerate(value):
-                self.writer.add_image('image/' + name.replace(' ', '-') + '-%d' % idx, img, self.iter)
+                prefix = kwargs.pop('prefix', 'image/')
+                self.writer.add_image(prefix + name.replace(' ', '-') + '-%d' % idx, img, global_step=self.iter)
 
-    def hist(self, name, value, n_bins=20, latest_only=False):
+    def hist(self, name, value, n_bins=20, latest_only=False, **kwargs):
         """
         schedules a histogram plot of (a batch of) points.
         A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -890,8 +911,10 @@ class Monitor:
             any-dim tensor to be histogrammed. The last dim should be 3.
         :param n_bins:
             number of bins of the histogram.
-        :param latest:
+        :param latest_only:
             whether to save only the latest statistics or keep everything from beginning.
+        :param kwargs:
+            additional options to tensorboard
         :return: ``None``.
         """
 
@@ -904,7 +927,8 @@ class Monitor:
 
         self._hist_since_last_flush[name][self.iter] = value
         if self.use_tensorboard:
-            self.writer.add_histogram('hist/' + name.replace(' ', '-'), value, self.iter)
+            prefix = kwargs.pop('prefix', 'hist/')
+            self.writer.add_histogram(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
     def schedule(self, func, beginning=True, *args, **kwargs):
         """
@@ -931,35 +955,35 @@ class Monitor:
     def _worker(self, it, epoch, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
                 _pointcloud_since_last_flush):
         prints = []
+        fig = plt.figure()
 
         # plot statistics
-        fig = plt.figure()
         plt.xlabel('iteration')
         for name, val in list(_num_since_last_flush.items()):
             self._num_since_beginning[name].update(val)
 
-            x_vals = list(self._num_since_beginning[name].keys())
             plt.ylabel(name)
+            x_vals = sorted(self._num_since_beginning[name].keys())
             y_vals = [self._num_since_beginning[name][x] for x in x_vals]
-            if isinstance(y_vals[0], dict):
-                keys = list(y_vals[0].keys())
-                y_vals = [tuple([y_val[k] for k in keys]) for y_val in y_vals]
-                plot = plt.plot(x_vals, y_vals)
-                plt.legend(plot, keys)
-                prints.append(
-                    "{}\t{:.5f}".format(name, np.mean(np.array([[val[k] for k in keys] for val in val.values()]), 0)))
-            else:
-                max_, min_, med_, mean_ = np.max(y_vals), np.min(y_vals), np.median(y_vals), np.mean(y_vals)
-                argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
-                plt.title('max: {:.8f} at iter {} \nmin: {:.8f} at iter {} \nmedian: {:.8f} '
-                          '\nmean: {:.8f}'.format(max_, x_vals[argmax_], min_, x_vals[argmin_], med_, mean_))
+            max_, min_, med_, mean_ = np.max(y_vals), np.min(y_vals), np.median(y_vals), np.mean(y_vals)
+            argmax_, argmin_ = np.argmax(y_vals), np.argmin(y_vals)
+            plt.title('max: {:.8f} at iter {} min: {:.8f} at iter {} \nmedian: {:.8f} mean: {:.8f}'
+                      .format(max_, x_vals[argmax_], min_, x_vals[argmin_], med_, mean_))
 
-                plt.plot(x_vals, y_vals)
-                prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
+            x_vals, y_vals = np.array(x_vals), np.array(y_vals)
+            inlier_indices = ~utils.is_outlier(y_vals)
+            y_vals_filtered = y_vals[inlier_indices]
+            min_, max_ = np.min(y_vals_filtered), np.max(y_vals_filtered)
+            interval = (.9 ** np.sign(min_) * min_, 1.1 ** np.sign(max_) * max_)
+            plt.plot(x_vals, y_vals)
+            if not (np.any(np.isnan(interval)) or np.any(np.isinf(interval))):
+                plt.ylim(interval)
 
+            prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
             fig.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
             if self.use_visdom:
                 self.vis.matplot(fig, win=name)
+
             fig.clear()
 
         # save recorded images
@@ -967,16 +991,13 @@ class Monitor:
             latest = self._options[name].get('latest_only')
 
             for itt, val in val.items():
-                if val.dtype != 'uint8':
-                    val = (255.99 * val).astype('uint8')
-
                 if len(val.shape) == 4:
                     if self.use_visdom:
                         self.vis.images(val, win=name)
 
                     for num in range(val.shape[0]):
                         img = val[num]
-                        if img.shape[0] == 3:
+                        if img.shape[0] in (1, 3):
                             img = np.transpose(img, (1, 2, 0))
 
                             if latest:
@@ -1000,16 +1021,6 @@ class Monitor:
                                     imwrite(os.path.join(self.image_folder,
                                                          name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)),
                                             img_normed)
-
-                elif len(val.shape) == 3 or len(val.shape) == 2:
-                    if self.use_visdom:
-                        self.vis.image(val if len(val.shape) == 2 else np.transpose(val, (2, 0, 1)), win=name)
-
-                    if latest:
-                        imwrite(os.path.join(self.image_folder, name.replace(' ', '_') + '.jpg'), val)
-                    else:
-                        imwrite(os.path.join(self.image_folder, name.replace(' ', '_') + '_%d.jpg' % itt), val)
-
                 else:
                     raise NotImplementedError
 
@@ -1047,40 +1058,30 @@ class Monitor:
         for name, vals in list(_pointcloud_since_last_flush.items()):
             latest = self._options[name].get('latest_only')
             for itt, val in vals.items():
-                if len(val.shape) == 2:
+                for ii in range(val.shape[0]):
                     ax = fig.add_subplot(111, projection='3d')
-                    ax.scatter(*[val[:, i] for i in range(val.shape[-1])])
-
+                    ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
                     if latest:
-                        plt.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
+                        plt.savefig(
+                            os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
                     else:
-                        plt.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % itt))
+                        plt.savefig(os.path.join(self.plot_folder,
+                                                 name.replace(' ', '_') + '_%d_%d.jpg' % (itt, ii + 1)))
 
-                elif len(val.shape) == 3:
-                    for ii in range(val.shape[0]):
-                        ax = fig.add_subplot(111, projection='3d')
-                        ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
-                        if latest:
-                            plt.savefig(
-                                os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
-                        else:
-                            plt.savefig(os.path.join(self.plot_folder,
-                                                     name.replace(' ', '_') + '_%d_%d.jpg' % (itt, ii + 1)))
-
-                        fig.clear()
-                else:
-                    raise NotImplementedError(
-                        'Point cloud tensor must have 2 or 3 dimensions, got %d.' % len(val.shape))
-
+                    fig.clear()
                 fig.clear()
             fig.clear()
         plt.close('all')
 
         with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
-            pkl.dump({'iter': it, 'epoch': epoch, 'num_iters': self.num_iters,
-                      'num': dict(self._num_since_beginning),
-                      'hist': dict(self._hist_since_beginning),
-                      'options': dict(self._options)}, f, pkl.HIGHEST_PROTOCOL)
+            dump_dict = {'iter': it,
+                         'epoch': epoch,
+                         'num_iters': self.num_iters,
+                         'num': dict(self._num_since_beginning),
+                         'hist': dict(self._hist_since_beginning),
+                         'options': dict(self._options)}
+
+            pkl.dump(dump_dict, f, pkl.HIGHEST_PROTOCOL)
             f.close()
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
@@ -1092,9 +1093,8 @@ class Monitor:
         time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
         elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
                                        else elapsed_time / 3600.) + time_unit
-        now = dt.now().strftime("%d/%m/%Y %H:%M:%S")
-        log = '{} Elapsed time {} {}\t{}\t{}'.format(now, elapsed_time, self.current_run, iter_show, '\t'.join(prints))
-        print(log)
+        log = 'Elapsed time {} {}\t{}\t{}'.format(elapsed_time, self.current_run, iter_show, '\t'.join(prints))
+        root_logger.info(log)
 
         if self.send_slack:
             message = 'From %s ' % self.current_folder
@@ -1140,7 +1140,7 @@ class Monitor:
             if os.path.exists(full_file):
                 os.remove(full_file)
             else:
-                print("The oldest saved file does not exist")
+                root_logger.warning('The oldest saved file does not exist')
             self._dump_files[file].remove(oldest_file)
 
         with open(os.path.join(self.current_folder, '_version.pkl'), 'wb') as f:
@@ -1219,12 +1219,12 @@ class Monitor:
         if keep < 2:
             name = os.path.join(self.current_folder, name)
             method(name, obj, **kwargs)
-            print('Object dumped to %s' % name)
+            root_logger.info('Object dumped to %s' % name)
         else:
             normed_name = self._version(name, keep)
             normed_name = os.path.join(self.current_folder, normed_name)
             method(normed_name, obj, **kwargs)
-            print('Object dumped to %s' % normed_name)
+            root_logger.info('Object dumped to %s' % normed_name)
 
     def _load(self, file, method, version=-1, **kwargs):
         assert isinstance(version, int), 'keep must be an int, got %s' % type(version)
@@ -1239,13 +1239,13 @@ class Monitor:
                 try:
                     obj = method(full_file, **kwargs)
                 except FileNotFoundError:
-                    print('No file named %s found' % file)
+                    root_logger.warning('No file named %s found' % file)
                     return None
             else:
-                if version <= 0:
+                if isinstance(version, int) and version <= 0:
                     if len(versions) > 0:
-                        latest = versions[-1]
-                        obj = method(os.path.join(self.current_folder, latest), **kwargs)
+                        version = versions[version]
+                        obj = method(os.path.join(self.current_folder, version), **kwargs)
                     else:
                         return method(full_file, **kwargs)
                 else:
@@ -1254,17 +1254,16 @@ class Monitor:
                     if file_name in versions:
                         obj = method(os.path.join(self.current_folder, file_name), **kwargs)
                     else:
-                        print('Version %d of %s is not found in %s' % (version, file, self.current_folder))
+                        root_logger.warning('Version %d of %s is not found in %s' % (version, file, self.current_folder))
                         return None
         except FileNotFoundError:
             try:
                 obj = method(full_file, **kwargs)
             except FileNotFoundError:
-                print('No file named %s found' % file)
+                root_logger.warning('No file named %s found' % file)
                 return None
 
-        text = str(version) if version > 0 else 'latest'
-        print('Version \'%s\' loaded' % text)
+        root_logger.info('Version \'%s\' loaded' % str(version))
         return obj
 
     def _save_pickle(self, name, obj):

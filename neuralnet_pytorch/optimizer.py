@@ -92,8 +92,8 @@ class NAdam(optim.Adam):
 
 class AdaBound(optim.Optimizer):
     """
-    Implements AdaBound algorithm.
-    It has been proposed in `Adaptive Gradient Methods with Dynamic Bound of Learning Rate`_.
+    Implements AdaBound algorithm proposed in
+    `Adaptive Gradient Methods with Dynamic Bound of Learning Rate`_.
 
     .. _Adaptive Gradient Methods with Dynamic Bound of Learning Rate:
         https://openreview.net/forum?id=Bkg3g2R9FX

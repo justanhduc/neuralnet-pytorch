@@ -17,17 +17,15 @@ def test_gin_config():
         return
 
     @gin.configurable('net')
-    def run(dtype, activation, loss, optimizer, scheduler):
-        print(dtype)
-        print(activation)
-        print(loss)
-        print(optimizer)
-        print(scheduler)
+    def assert_same(dtype, activation, loss, optimizer, scheduler):
+        assert dtype is T.float32
+        assert isinstance(activation(), T.nn.Tanh)
+        assert isinstance(loss(), T.nn.L1Loss)
 
     import os
     config_file = os.path.join(os.path.dirname(__file__), 'test_files/test.gin')
     gin.parse_config_file(config_file)
-    run()
+    assert_same()
 
 
 @pytest.mark.parametrize('device', dev)
