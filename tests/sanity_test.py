@@ -260,7 +260,7 @@ def test_max_avg_pooling_layer(device, filter_size, stride, padding, dilation, c
 @pytest.mark.parametrize('keepdim', (True, False))
 def test_global_avgpool2d(device, keepdim):
     shape = (2, 3, 4, 5)
-    a = T.arange(np.prod(shape)).reshape(*shape).to(device)
+    a = T.arange(np.prod(shape)).reshape(*shape).to(device).float()
     expected = T.tensor([[9.5000, 29.5000, 49.5000],
                          [69.5000, 89.5000, 109.5000]]).to(device)
     if keepdim:
@@ -508,7 +508,7 @@ def test_spectral_norm(device):
      ((15, 10, 9), None, 'nearest', None, (2, 3, 10, 10, 10)))
 )
 def test_interpolate(device, size, scale_factor, mode, align_corners, input_shape):
-    a = T.arange(np.prod(input_shape)).view(*input_shape).to(device)
+    a = T.arange(np.prod(input_shape)).view(*input_shape).to(device).float()
     interp = nnt.Interpolate(size, scale_factor, mode, align_corners, input_shape)
 
     output = F.interpolate(a, size, scale_factor, mode, align_corners)

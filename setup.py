@@ -50,11 +50,16 @@ def setup_package():
         packages=find_packages(exclude=['docs']),
         ext_modules=[
             CUDAExtension('chamfer', [
-                'neuralnet_pytorch/extensions/chamfer_cuda.cpp',
-                'neuralnet_pytorch/extensions/chamfer.cu',
+                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer_cuda.cpp',
+                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer.cu',
             ]),
+            CUDAExtension(
+                name='emd_cuda',
+                sources=[
+                    'neuralnet_pytorch/extensions/cuda/emd_c/emd.cpp',
+                    'neuralnet_pytorch/extensions/cuda/emd_c/emd_kernel.cu',
+                ])
         ],
-        dependency_links=['https://github.com/szagoruyko/pyinn/tarball/master#egg=pyinn'],
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
                           'imageio', 'gin-config', 'future', 'tensorboardX'],

@@ -24,7 +24,7 @@ The following classes equip the plain ``torch`` modules with more bells and whis
 Also, some features are deeply integrated into Neuralnet-pytorch,
 which enables faster and more convenient training and testing of your neural networks.
 
-.. autoclass:: neuralnet_pytorch.layers._LayerMethod
+.. autoclass:: neuralnet_pytorch.layers.layers._LayerMethod
     :members:
 .. autoclass:: neuralnet_pytorch.layers.Net
     :members:
@@ -41,7 +41,7 @@ Extended Pytorch Abstract Layers
 Quick-and-dirty Layers
 ----------------------
 
-.. autofunction:: neuralnet_pytorch.layers.wrapper
+.. autodecorator:: neuralnet_pytorch.layers.wrapper
 .. autoclass:: neuralnet_pytorch.layers.Lambda
 
 Common Layers

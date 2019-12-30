@@ -4,9 +4,9 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.modules.utils import _ntuple
 
-from neuralnet_pytorch import utils
-from neuralnet_pytorch.utils import _image_shape
-from neuralnet_pytorch.layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
+from .. import utils
+from ..utils import _image_shape
+from .layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 
 __all__ = ['Interpolate', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D',
            'ConcurrentCat', 'SequentialCat']
