@@ -1,9 +1,11 @@
 from setuptools import setup, find_packages
 import os
 import versioneer
+from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 version_data = versioneer.get_versions()
 CMD_CLASS = versioneer.get_cmdclass()
+CMD_CLASS.update({'build_ext': BuildExtension})
 
 if version_data['error'] is not None:
     # Get the fallback version
@@ -46,6 +48,14 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs']),
+        ext_modules=[
+            CppExtension('batch_pairwise_distance_cpp', [
+                'neuralnet_pytorch/extensions/cpp/bpd/bpd.cpp'
+            ]),
+            CppExtension('pointcloud_to_voxel_cpp', [
+                'neuralnet_pytorch/extensions/cpp/pc2vox/pc2vox.cpp'
+            ])
+        ],
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
                           'imageio', 'future', 'tensorboardX'],

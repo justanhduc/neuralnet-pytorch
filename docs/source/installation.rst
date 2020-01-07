@@ -19,17 +19,8 @@ Other dependencies
 ^^^^^^^^^^^^^^^^^^
 
 In Neuralnet-pytorch, we use several backends to visualize training, so it is necessary to install
-some additional packages.
-
-* `Matplotlib <https://matplotlib.org/>`_
-
-* `Visdom <https://github.com/facebookresearch/visdom>`_
-
-* `TensorboardX <https://github.com/lanpa/tensorboardX>`_
-
-To install all dependencies in a go, simply open a Terminal session and execute ::
-
-    pip install matplotlib visdom tensorboardX
+some additional packages. For convenience, installing the package will install all the required
+dependencies. Optional dependencies can be installed as instructed below.
 
 
 Install Neuralnet-pytorch
@@ -52,6 +43,13 @@ From Github
 To install the bleeding-edge version, which is highly recommended, run ::
 
     pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master
+
+
+To install the package with optional dependencies, try ::
+
+    pip install "neuralnet-pytorch[option] @ git+git://github.com/justanhduc/neuralnet-pytorch.git@master"
+
+in which ``option`` can be ``gin`` and/or ``emd``.
 
 
 We also provide a version with some fancy Cuda/C++ implementations

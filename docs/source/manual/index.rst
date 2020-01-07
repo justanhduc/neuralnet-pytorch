@@ -49,3 +49,10 @@ Extras
     :maxdepth: 4
 
     utilities
+
+Gin-config
+----------
+.. toctree::
+    :maxdepth: 4
+
+    gin
