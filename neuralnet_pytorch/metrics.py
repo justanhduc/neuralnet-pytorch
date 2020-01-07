@@ -124,7 +124,7 @@ def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=True):
     return loss_1 + loss_2
 
 
-def emd_loss(xyz1, xyz2, reduce='mean', sinkhorn=True):
+def emd_loss(xyz1, xyz2, reduce='mean', sinkhorn=False):
     """
     Calculates the Earth Mover Distance (or Wasserstein metric) between two sets
     of points.

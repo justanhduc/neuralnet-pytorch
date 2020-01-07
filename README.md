@@ -8,12 +8,17 @@
 
 __A high level framework for general purpose neural networks in Pytorch.__
 
-Personally, going from Theano to Pytorch is pretty much like time traveling from 90s to the modern day. 
-However, despite a lot of bells and whistles, I still feel there are some missing elements from Pytorch 
-which are confirmed to be never added to the library. 
-Therefore, this library is written to add more features to the current magical Pytorch. All the modules here
-directly subclass the corresponding modules from Pytorch, so everything should still be familiar. For example, the 
-following snippet in Pytorch
+Personally, going from Theano to Pytorch is pretty much like
+time traveling from 90s to the modern day.
+However, we feel like despite having a lot of bells and whistles,
+Pytorch is still missing many elements
+that are confirmed to never be added to the library.
+Therefore, this library is written to supplement more features
+to the current magical Pytorch.
+All the modules in the package directly subclass
+the corresponding modules from Pytorch,
+so everything should still be familiar.
+For example, the following snippet in Pytorch
 
 ```
 from torch import nn
