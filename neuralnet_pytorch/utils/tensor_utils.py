@@ -447,31 +447,45 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
     return dimshuffle(output, (0, 3, 1, 2))
 
 
-def batch_pairwise_dist(x: T.Tensor, y: T.Tensor):
+def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=True):
     """
     Calculates the pair-wise distance between two sets of points.
 
     :param x:
-        a tensor of shape (m, nx, d).
+        a tensor of shape ``(m, nx, d)``.
     :param y:
-        a tensor of shape (m, ny, d).
+        a tensor of shape ``(m, ny, d)``.
+    :param c_code:
+        whether to use a C++ implementation.
+        Default: ``True``.
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
+    assert x.ndimension() in (2, 3) and y.ndimension() in (2, 3), \
+        'Input point clouds must be 2D or 3D tensors'
+    if x.ndimension() == 2:
+        x = x[None]
 
-    bs, num_points_x, points_dim = x.size()
-    _, num_points_y, _ = y.size()
-    xx = T.bmm(x, x.transpose(2, 1))
-    yy = T.bmm(y, y.transpose(2, 1))
-    zz = T.bmm(x, y.transpose(2, 1))
+    if y.ndimension() == 2:
+        y = y[None]
 
-    diag_ind_x = T.arange(0, num_points_x).to(device=x.device, dtype=T.long)
-    diag_ind_y = T.arange(0, num_points_y).to(device=x.device, dtype=T.long)
+    if c_code:
+        from ..extensions import batch_pairwise_dist
+        return batch_pairwise_dist(x, y)
+    else:
+        bs, num_points_x, points_dim = x.size()
+        _, num_points_y, _ = y.size()
+        xx = T.bmm(x, x.transpose(2, 1))
+        yy = T.bmm(y, y.transpose(2, 1))
+        zz = T.bmm(x, y.transpose(2, 1))
 
-    rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
-    ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
-    P = (rx.transpose(2, 1) + ry - 2 * zz)
-    return P
+        diag_ind_x = T.arange(0, num_points_x).to(device=x.device, dtype=T.long)
+        diag_ind_y = T.arange(0, num_points_y).to(device=x.device, dtype=T.long)
+
+        rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
+        ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
+        P = (rx.transpose(2, 1) + ry - 2 * zz)
+        return P
 
 
 def gram_matrix(x: T.Tensor) -> T.Tensor:

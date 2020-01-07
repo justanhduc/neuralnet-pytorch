@@ -5,7 +5,6 @@ import torch.nn as nn
 
 from . import layers
 from . import utils
-from .extensions import earth_mover_distance as emd
 
 __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'emd_loss', 'tv_reg',
            'spectral_norm']

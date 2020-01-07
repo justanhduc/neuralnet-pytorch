@@ -80,6 +80,7 @@ def is_outlier(x: np.ndarray, thresh=3.5):
     Handle Outliers", The ASQC Basic References in Quality Control:
     Statistical Techniques, Edward F. Mykytka, Ph.D., Editor.
     """
+
     if len(x) == 1:
         return np.array([False])
 

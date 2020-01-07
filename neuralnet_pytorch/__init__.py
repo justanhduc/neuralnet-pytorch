@@ -38,7 +38,7 @@ from . import utils
 from .utils import DataLoader, DataPrefetcher, cuda_available, function
 from .layers import *
 from .metrics import *
-from .optimizer import *
+from . import optim
 from .monitor import *
 
 from .version import author as __author__

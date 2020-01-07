@@ -16,7 +16,9 @@ config.external_configurable(optim.ASGD, 'asgd', module='T.optim')
 config.external_configurable(optim.LBFGS, 'lbfgs', module='T.optim')
 config.external_configurable(optim.RMSprop, 'rmsprop', module='T.optim')
 config.external_configurable(optim.Rprop, 'rprop', module='T.optim')
-config.external_configurable(nnt.AdaBound, 'adabound', module='nnt')
+config.external_configurable(nnt.optim.AdaBound, 'adabound', module='nnt')
+config.external_configurable(nnt.optim.Lookahead, 'lookahead', module='nnt')
+config.external_configurable(nnt.optim.NAdam, 'nadam', module='nnt')
 
 try:
     import apex
@@ -36,7 +38,8 @@ config.external_configurable(optim.lr_scheduler.ExponentialLR, 'exp_lr', module=
 config.external_configurable(optim.lr_scheduler.CosineAnnealingLR, 'cosine_lr', module='T.optim.lr_scheduler')
 config.external_configurable(optim.lr_scheduler.ReduceLROnPlateau, 'plateau_lr', module='T.optim.lr_scheduler')
 config.external_configurable(optim.lr_scheduler.CyclicLR, 'cyclic_lr', module='T.optim.lr_scheduler')
-config.external_configurable(nnt.InverseLR, 'inverse_lr')
+config.external_configurable(nnt.optim.lr_scheduler.InverseLR, 'inverse_lr')
+config.external_configurable(nnt.optim.lr_scheduler.WarmRestart, 'warm_restart')
 
 # losses
 config.external_configurable(nn.L1Loss, 'l1loss', module='T.nn')

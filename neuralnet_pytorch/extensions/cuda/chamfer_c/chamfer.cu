@@ -1,12 +1,7 @@
-
 #include <stdio.h>
 #include <ATen/ATen.h>
-
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-#include <vector>
-
 
 
 __global__ void NmDistanceKernel(int b,int n,const float * xyz,int m,const float * xyz2,float * result,int * result_i){
@@ -145,7 +140,6 @@ int chamfer_cuda_forward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor dist1, at:
 	cudaError_t err = cudaGetLastError();
 	  if (err != cudaSuccess) {
 	    printf("error in nnd updateOutput: %s\n", cudaGetErrorString(err));
-	    //THError("aborting");
 	    return 0;
 	  }
 	  return 1;
@@ -174,9 +168,6 @@ __global__ void NmDistanceGradKernel(int b,int n,const float * xyz1,int m,const 
 }
 // int chamfer_cuda_backward(int b,int n,const float * xyz1,int m,const float * xyz2,const float * grad_dist1,const int * idx1,const float * grad_dist2,const int * idx2,float * grad_xyz1,float * grad_xyz2, cudaStream_t stream){
 int chamfer_cuda_backward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor gradxyz1, at::Tensor gradxyz2, at::Tensor graddist1, at::Tensor graddist2, at::Tensor idx1, at::Tensor idx2){
-	// cudaMemset(grad_xyz1,0,b*n*3*4);
-	// cudaMemset(grad_xyz2,0,b*m*3*4);
-	
 	const auto batch_size = xyz1.size(0);
 	const auto n = xyz1.size(1); //num_points point cloud A
 	const auto m = xyz2.size(1); //num_points point cloud B

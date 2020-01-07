@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import os
 import versioneer
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
 
 version_data = versioneer.get_versions()
 CMD_CLASS = versioneer.get_cmdclass()
@@ -51,14 +51,18 @@ def setup_package():
         ext_modules=[
             CUDAExtension('chamfer', [
                 'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer_cuda.cpp',
-                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer.cu',
+                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer.cu'
             ]),
-            CUDAExtension(
-                name='emd_cuda',
-                sources=[
-                    'neuralnet_pytorch/extensions/cuda/emd_c/emd.cpp',
-                    'neuralnet_pytorch/extensions/cuda/emd_c/emd_kernel.cu',
-                ])
+            CUDAExtension('emd_cuda', [
+                'neuralnet_pytorch/extensions/cuda/emd_c/emd.cpp',
+                'neuralnet_pytorch/extensions/cuda/emd_c/emd_kernel.cu'
+            ]),
+            CppExtension('batch_pairwise_distance_cpp', [
+                'neuralnet_pytorch/extensions/cpp/bpd/bpd.cpp'
+            ]),
+            CppExtension('pointcloud_to_voxel_cpp', [
+                'neuralnet_pytorch/extensions/cpp/pc2vox/pc2vox.cpp'
+            ])
         ],
         cmdclass=CMD_CLASS,
         install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
