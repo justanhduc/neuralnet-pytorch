@@ -28,7 +28,6 @@ class Lookahead(Optimizer):
         self._la_step = 0  # counter for inner optimizer
         self.alpha = alpha
         self._total_la_steps = la_steps
-        pullback_momentum = pullback_momentum.lower()
         assert pullback_momentum in ['reset', 'pullback', None]
         self.pullback_momentum = pullback_momentum
 
