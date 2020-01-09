@@ -2,7 +2,6 @@ import torch as T
 import numpy as np
 from torch import testing
 from torch.nn import functional as F
-from torchvision.models import resnet
 import pytest
 
 import neuralnet_pytorch as nnt
@@ -184,6 +183,7 @@ def test_batchnorm2d_layer(device, shape, output_shape):
 
 @pytest.mark.parametrize('device', dev)
 def test_resnet_basic_block(device):
+    from torchvision.models import resnet
     shape = (64, 64, 32, 32)
     n_filters = 64
 
@@ -209,6 +209,7 @@ def test_resnet_basic_block(device):
 
 @pytest.mark.parametrize('device', dev)
 def test_resnet_bottleneck_block(device):
+    from torchvision.models import resnet
     shape = (64, 64, 32, 32)
     n_filters = 64
 

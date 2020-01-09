@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include <ATen/ATen.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -127,7 +126,8 @@ __global__ void NmDistanceKernel(int b,int n,const float * xyz,int m,const float
 		}
 	}
 }
-// int chamfer_cuda_forward(int b,int n,const float * xyz,int m,const float * xyz2,float * result,int * result_i,float * result2,int * result2_i, cudaStream_t stream){
+
+
 int chamfer_cuda_forward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor dist1, at::Tensor dist2, at::Tensor idx1, at::Tensor idx2){
 
 	const auto batch_size = xyz1.size(0);
@@ -166,7 +166,8 @@ __global__ void NmDistanceGradKernel(int b,int n,const float * xyz1,int m,const 
 		}
 	}
 }
-// int chamfer_cuda_backward(int b,int n,const float * xyz1,int m,const float * xyz2,const float * grad_dist1,const int * idx1,const float * grad_dist2,const int * idx2,float * grad_xyz1,float * grad_xyz2, cudaStream_t stream){
+
+
 int chamfer_cuda_backward(at::Tensor xyz1, at::Tensor xyz2, at::Tensor gradxyz1, at::Tensor gradxyz2, at::Tensor graddist1, at::Tensor graddist2, at::Tensor idx1, at::Tensor idx2){
 	const auto batch_size = xyz1.size(0);
 	const auto n = xyz1.size(1); //num_points point cloud A

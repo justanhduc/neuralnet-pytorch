@@ -1,8 +1,6 @@
 import numpy as np
 import torch as T
 import threading
-import warnings
-from torch.utils.data.dataloader import default_collate
 from queue import Queue
 from scipy.stats import truncnorm
 
@@ -68,15 +66,35 @@ class DataLoader:
     dataset
         an instance of :class:`torch.utils.data.Dataset`.
     batch_size
-        batch size
+        how many samples per batch to load.
+        Default: 1.
     shuffle
         whether to shuffle in each iteration.
+        Default: ``False``.
+    sampler
+        defines the strategy to draw samples from the dataset.
+        If specified, :attr:`shuffle` must be ``False``.
+    batch_sampler
+        like :attr:`sampler`, but returns a batch of indices at a time.
+        Mutually exclusive with :attr:`batch_size`,
+        :attr:`shuffle`, :attr:`sampler`, and :attr:`drop_last`.
     num_workers
         number of threads to be used.
     collate_fn
         function to specify how a batch is loaded.
+    pin_memory
+        if ``True``, the data loader will copy Tensors
+        into CUDA pinned memory before returning them.  If your data elements
+        are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type.
+        Default: False.
     num_cached
         number of batches to be cached.
+    drop_last
+        set to ``True`` to drop the last incomplete batch,
+        if the dataset size is not divisible by the batch size. If ``False`` and
+        the size of dataset is not divisible by the batch size, then the last batch
+        will be smaller.
+        Default: ``False``.
     kwargs
         arguments what will not be used.
         For compatibility with :class:`torch.utils.data.Dataloader` only.
@@ -87,27 +105,70 @@ class DataLoader:
         contains batches of data when iterating over the dataset.
     _indices
         contains the indices of samples of the dataset.
-    num_batches
-        the number of batches in the dataset.
     """
+    __initialized = False
 
-    def __init__(self, dataset, batch_size, shuffle=False, num_workers=10, collate_fn=None, num_cached=10, **kwargs):
+    def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None, num_workers=0,
+                 collate_fn=None, pin_memory=False, drop_last=False, num_cached=10, **kwargs):
+        if len(kwargs.keys()) > 0:
+            root_logger.warning(str(kwargs.keys()) +
+                                ' are present for compatibility with '
+                                '`torch.utils.data.DataLoader` interface'
+                                ' and will be ignored.')
+
+        if batch_sampler is not None and sampler is not None:
+            root_logger.warning('sampler will not be used as batch_sampler is provided.')
+
+        if batch_sampler is not None:
+            # auto_collation with custom batch_sampler
+            if batch_size != 1 or shuffle or sampler is not None or drop_last:
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
+            batch_size = None
+            drop_last = False
+        elif batch_size is None:
+            # no auto_collation
+            raise NotImplementedError('batch_size=None is currently not supported')
+
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
+        self.pin_memory = pin_memory
         self.num_cached = num_cached
         self.num_workers = num_workers
-        self.collate_fn = default_collate if collate_fn is None else collate_fn
+        self.drop_last = drop_last
         self.batches = None
-        self._indices = None
-        self.num_batches = len(self.dataset) // self.batch_size
 
-        if len(kwargs.keys()) > 0:
-            warnings.warn(str(kwargs.keys()) +
-                          " are present for compatibility with "
-                          "`torch.utils.data.DataLoader` interface"
-                          " and will be ignored.",
-                          stacklevel=2)
+        from torch.utils.data.sampler import RandomSampler, SequentialSampler, BatchSampler
+        if sampler is None:
+            if shuffle:
+                sampler = RandomSampler(dataset)
+            else:
+                sampler = SequentialSampler(dataset)
+
+        if batch_size is not None and batch_sampler is None:
+            # auto_collation without custom batch_sampler
+            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+
+        self.sampler = sampler
+        self.batch_sampler = batch_sampler
+        if collate_fn is None:
+            from torch.utils.data._utils.collate import default_collate, default_convert
+            if self._auto_collation:
+                collate_fn = default_collate
+            else:
+                collate_fn = default_convert
+
+        self.collate_fn = collate_fn
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and attr in ('batch_size', 'batch_sampler', 'sampler', 'drop_last', 'dataset'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
         self.batches = self._get_batches()
@@ -117,6 +178,20 @@ class DataLoader:
         if self.batches is None:
             self.batches = self._get_batches()
         return self.batches.__next__()
+
+    @property
+    def _auto_collation(self):
+        return self.batch_sampler is not None
+
+    @property
+    def _index_sampler(self):
+        if self._auto_collation:
+            return self.batch_sampler
+        else:
+            return self.sampler
+
+    def __len__(self):
+        return len(self._index_sampler)
 
     def _get_batches(self):
         batches = self._generator()
@@ -148,17 +223,32 @@ class DataLoader:
             yield item
             queue.task_done()
 
+    def _getdata(self, index):
+        batch = [self.dataset[i] for i in index]
+        batch = self.collate_fn(batch)
+        if self.pin_memory:
+            batch = T.utils.data._utils.pin_memory.pin_memory(batch)
+
+        return batch
+
     def _generator(self):
         assert isinstance(self.dataset[0],
                           (list, tuple, np.ndarray)), 'Dataset should consist of lists/tuples or Numpy ndarray'
-        self._indices = np.arange(len(self.dataset))
-        if self.shuffle:
-            np.random.shuffle(self._indices)
 
-        for i in range(self.num_batches):
-            slice_ = self._indices[i * self.batch_size:(i + 1) * self.batch_size]
-            batch = [self.dataset[s] for s in slice_]
-            batch = self.collate_fn(batch)
+        batch = None
+        index = -1
+        sampler_iter = iter(self._index_sampler)
+        for index in sampler_iter:
+            if not isinstance(index, (tuple, list)):
+                index = [index]
+
+            if len(index) == self.batch_size:
+                batch = self._getdata(index)
+                yield batch
+            batch = None
+
+        if batch is not None and not self.drop_last:
+            batch = self._getdata(index)
             yield batch
 
 

@@ -136,3 +136,31 @@ def test_slicing_sequential(idx):
     start = 0 if idx.start is None else idx.start
     assert isinstance(b, nnt.Sequential)
     assert b.input_shape == a[start].input_shape
+
+
+@pytest.mark.parametrize('bs', (pytest.param(None, marks=pytest.mark.xfail), 1, 2, 3, 4, 5))
+@pytest.mark.parametrize('shuffle', (True, False))
+@pytest.mark.parametrize('drop_last', (True, False))
+@pytest.mark.parametrize('pin_memory', (True, False))
+def test_dataloader(bs, shuffle, drop_last, pin_memory):
+    from torch.utils.data import TensorDataset
+    data, label = T.arange(10), T.arange(10) + 10
+    dataset = TensorDataset(data, label)
+    loader = nnt.DataLoader(dataset, batch_size=bs, shuffle=shuffle, drop_last=drop_last, pin_memory=pin_memory,
+                            num_workers=10)
+    loader = nnt.DataPrefetcher(loader)
+
+    for epoch in range(2):
+        data_, label_ = [], []
+        for batch in loader:
+            data_.append(batch[0])
+            label_.append(batch[1])
+
+        data_ = sorted(T.cat(data_))
+        label_ = sorted(T.cat(label_))
+        if len(data_) != len(data):
+            assert len(data_) == len(data) // bs * bs
+            assert len(label_) == len(label) // bs * bs
+        else:
+            testing.assert_allclose(data_, data)
+            testing.assert_allclose(label_, label)
