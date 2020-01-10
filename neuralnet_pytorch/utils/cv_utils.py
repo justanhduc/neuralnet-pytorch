@@ -141,7 +141,7 @@ def pc2vox(pc: T.Tensor, vox_size=32, sigma=.005, analytical_gauss_norm=True):
     return voxels
 
 
-def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, c_code=True):
+def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, c_code=False):
     """
     A fast conversion from a centered point cloud to voxel representation.
 
@@ -162,6 +162,7 @@ def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, 
     :return:
         the voxel representation of input.
     """
+
     assert pc.ndimension() in (2, 3), 'Point cloud must be a 2D a 3D tensor'
     if pc.ndimension() == 2:
         pc = pc[None]

@@ -447,7 +447,7 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
     return dimshuffle(output, (0, 3, 1, 2))
 
 
-def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=True):
+def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=False):
     """
     Calculates the pair-wise distance between two sets of points.
 
@@ -461,6 +461,7 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=True):
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
+
     assert x.ndimension() in (2, 3) and y.ndimension() in (2, 3), \
         'Input point clouds must be 2D or 3D tensors'
     if x.ndimension() == 2:
