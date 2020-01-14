@@ -14,10 +14,17 @@ import pickle as pkl
 from imageio import imwrite
 import os
 import time
-import visdom
 from shutil import copyfile
 import torch as T
 import torch.nn as nn
+import logging
+
+try:
+    import visdom
+
+    visdom_available = True
+except ImportError:
+    visdom_available = False
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -26,7 +33,7 @@ except ImportError:
 
 from . import layers
 from . import utils
-from .utils import root_logger, log_formatter, logging
+from .utils import root_logger, log_formatter
 
 __all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
@@ -298,8 +305,7 @@ class Monitor:
             self.current_folder = self._get_new_folder()
             os.mkdir(self.current_folder)
 
-        self.use_visdom = use_visdom
-        if use_visdom:
+        if use_visdom and visdom_available:
             server = kwargs.pop('server', 'http://localhost')
             port = kwargs.pop('port', 8097)
             self.vis = visdom.Visdom(server=server, port=port)
@@ -309,11 +315,14 @@ class Monitor:
 
             self.vis.close()
             print('You can navigate to \'%s:%d\' for visualization' % (server, port))
+        else:
+            self.vis = None
 
-        self.use_tensorboard = use_tensorboard
         if use_tensorboard:
             os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
             self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
+        else:
+            self.writer = None
 
         self._q = queue.Queue()
         self._thread = threading.Thread(target=self._work, daemon=True)
@@ -741,7 +750,7 @@ class Monitor:
     def _atexit(self):
         self.flush()
         plt.close()
-        if self.use_tensorboard:
+        if self.writer is not None:
             self.writer.close()
 
         self._q.join()
@@ -827,7 +836,7 @@ class Monitor:
             value = utils.to_numpy(value)
 
         self._num_since_last_flush[name][self.iter] = value
-        if self.use_tensorboard:
+        if self.writer is not None:
             prefix = kwargs.pop('prefix', 'scalar/')
             self.writer.add_scalar(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
@@ -857,7 +866,7 @@ class Monitor:
             value = value[None]
 
         self._points_since_last_flush[name][self.iter] = value
-        if self.use_tensorboard:
+        if self.writer is not None:
             self.writer.add_mesh(name, value, global_step=self.iter, **kwargs)
 
     def imwrite(self, name: str, value, latest_only=False, **kwargs):
@@ -895,7 +904,7 @@ class Monitor:
             value = value[None, None]
 
         self._img_since_last_flush[name][self.iter] = value
-        if self.use_tensorboard:
+        if self.writer is not None:
             for idx, img in enumerate(value):
                 prefix = kwargs.pop('prefix', 'image/')
                 self.writer.add_image(prefix + name.replace(' ', '-') + '-%d' % idx, img, global_step=self.iter)
@@ -926,7 +935,7 @@ class Monitor:
             self._options[name]['n_bins'] = n_bins
 
         self._hist_since_last_flush[name][self.iter] = value
-        if self.use_tensorboard:
+        if self.writer is not None:
             prefix = kwargs.pop('prefix', 'hist/')
             self.writer.add_histogram(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
@@ -981,7 +990,7 @@ class Monitor:
 
             prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
             fig.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
-            if self.use_visdom:
+            if self.vis is not None:
                 self.vis.matplot(fig, win=name)
 
             fig.clear()
@@ -992,7 +1001,7 @@ class Monitor:
 
             for itt, val in val.items():
                 if len(val.shape) == 4:
-                    if self.use_visdom:
+                    if self.vis is not None:
                         self.vis.images(val, win=name)
 
                     for num in range(val.shape[0]):
@@ -1026,7 +1035,7 @@ class Monitor:
 
         # make histograms of recorded data
         for name, val in list(_hist_since_last_flush.items()):
-            if self.use_tensorboard:
+            if self.writer is not None:
                 k = max(list(_hist_since_last_flush[name].keys()))
                 self.writer.add_histogram(name, np.array(val[k]).flatten(), global_step=k)
 

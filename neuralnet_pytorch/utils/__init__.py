@@ -22,3 +22,4 @@ _pointset_shape = _make_input_shape(2, 0)
 
 del torch
 del _make_input_shape
+del logging
