@@ -1,21 +1,8 @@
-/**********************************
- * Original Author: Haoqiang Fan
- * Modified by: Kaichun Mo
- *********************************/
-
-#ifndef _EMD_KERNEL
-#define _EMD_KERNEL
-
 #include <cmath>
 #include <vector>
-
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>  // at::cuda::getApplyGrid
 #include <THC/THC.h>
-
-#define CHECK_CUDA(x) AT_CHECK(x.type().is_cuda(), #x " must be a CUDA tensor")
-#define CHECK_CONTIGUOUS(x) AT_CHECK(x.is_contiguous(), #x " must be contiguous")
-#define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
 
 /********************************
@@ -23,7 +10,7 @@
 *********************************/
 
 template<typename scalar_t>
-__global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1,const scalar_t * __restrict__ xyz2,scalar_t * __restrict__ match,scalar_t * temp){
+__global__ void approxmatch(int b, int n, int m, const scalar_t* __restrict__ xyz1, const scalar_t* __restrict__ xyz2, scalar_t* __restrict__ match, scalar_t* temp) {
 	scalar_t * remainL=temp+blockIdx.x*(n+m)*2, * remainR=temp+blockIdx.x*(n+m)*2+n,*ratioL=temp+blockIdx.x*(n+m)*2+n+m,*ratioR=temp+blockIdx.x*(n+m)*2+n+m+n;
 	scalar_t multiL,multiR;
 	if (n>=m){
@@ -114,7 +101,7 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 					sumr*=remainR[l];
 					scalar_t consumption=fminf(remainR[l]/(sumr+1e-9f),1.0f);
 					ratioR[l]=consumption*remainR[l];
-					remainR[l]=fmaxf(0.0f,remainR[l]-sumr);
+					remainR[l]=fmaxf(scalar_t(0.0),remainR[l]-sumr);
 				}
 			}
 			__syncthreads();
@@ -150,16 +137,13 @@ __global__ void approxmatch(int b,int n,int m,const scalar_t * __restrict__ xyz1
 					__syncthreads();
 				}
 				if (k<n)
-					remainL[k]=fmaxf(0.0f,remainL[k]-suml);
+					remainL[k]=fmaxf(scalar_t(0.0),remainL[k]-suml);
 			}
 			__syncthreads();
 		}
 	}
 }
 
-//void approxmatchLauncher(int b,int n,int m,const scalar_t * xyz1,const scalar_t * xyz2,scalar_t * match,scalar_t * temp){
-//	approxmatch<<<32,512>>>(b,n,m,xyz1,xyz2,match,temp);
-//}
 
 /* ApproxMatch forward interface
 Input:
@@ -168,28 +152,27 @@ Input:
 Output:
   match: (B, N2, N1)
 */
-at::Tensor ApproxMatchForward(
-    const at::Tensor xyz1,
-    const at::Tensor xyz2){
-  const auto b = xyz1.size(0);
-  const auto n = xyz1.size(1);
-  const auto m = xyz2.size(1);
+at::Tensor approx_match_cuda_forward(const at::Tensor xyz1, const at::Tensor xyz2) {
+    const auto b = xyz1.size(0);
+    const auto n = xyz1.size(1);
+    const auto m = xyz2.size(1);
 
-  CHECK_EQ(xyz2.size(0), b);
-  CHECK_EQ(xyz1.size(2), 3);
-  CHECK_EQ(xyz2.size(2), 3);
-  CHECK_INPUT(xyz1);
-  CHECK_INPUT(xyz2);
+    auto match = at::zeros({b, m, n}, xyz1.type());
+    auto temp = at::zeros({b, (n+m)*2}, xyz1.type());
 
-  auto match = at::zeros({b, m, n}, xyz1.type());
-  auto temp = at::zeros({b, (n+m)*2}, xyz1.type());
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, xyz1.scalar_type(), "approx_match_forward_cuda", ([&] {
+        approxmatch<scalar_t><<<32,512>>>(
+            b,
+            n,
+            m,
+            xyz1.data<scalar_t>(),
+            xyz2.data<scalar_t>(),
+            match.data<scalar_t>(),
+            temp.data<scalar_t>());
+    }));
+    THCudaCheck(cudaGetLastError());
 
-  AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "ApproxMatchForward", ([&] {
-        approxmatch<scalar_t><<<32,512>>>(b, n, m, xyz1.data<scalar_t>(), xyz2.data<scalar_t>(), match.data<scalar_t>(), temp.data<scalar_t>());
-  }));
-  THCudaCheck(cudaGetLastError());
-
-  return match;
+    return match;
 }
 
 
@@ -242,9 +225,6 @@ __global__ void matchcost(int b,int n,int m,const scalar_t * __restrict__ xyz1,c
 	}
 }
 
-//void matchcostLauncher(int b,int n,int m,const scalar_t * xyz1,const scalar_t * xyz2,const scalar_t * match,scalar_t * out){
-//	matchcost<<<32,512>>>(b,n,m,xyz1,xyz2,match,out);
-//}
 
 /* MatchCost forward interface
 Input:
@@ -254,28 +234,26 @@ Input:
 Output:
   cost: (B)
 */
-at::Tensor MatchCostForward(
-    const at::Tensor xyz1,
-    const at::Tensor xyz2,
-    const at::Tensor match){
-  const auto b = xyz1.size(0);
-  const auto n = xyz1.size(1);
-  const auto m = xyz2.size(1);
+at::Tensor match_cost_cuda_forward(const at::Tensor xyz1, const at::Tensor xyz2, const at::Tensor match) {
+    const auto b = xyz1.size(0);
+    const auto n = xyz1.size(1);
+    const auto m = xyz2.size(1);
 
-  CHECK_EQ(xyz2.size(0), b);
-  CHECK_EQ(xyz1.size(2), 3);
-  CHECK_EQ(xyz2.size(2), 3);
-  CHECK_INPUT(xyz1);
-  CHECK_INPUT(xyz2);
+    auto cost = at::zeros({b}, xyz1.type());
 
-  auto cost = at::zeros({b}, xyz1.type());
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, xyz1.scalar_type(), "match_cost_forward_cuda", ([&] {
+        matchcost<scalar_t><<<32,512>>>(
+            b,
+            n,
+            m,
+            xyz1.data<scalar_t>(),
+            xyz2.data<scalar_t>(),
+            match.data<scalar_t>(),
+            cost.data<scalar_t>());
+    }));
+    THCudaCheck(cudaGetLastError());
 
-  AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "MatchCostForward", ([&] {
-        matchcost<scalar_t><<<32,512>>>(b, n, m, xyz1.data<scalar_t>(), xyz2.data<scalar_t>(), match.data<scalar_t>(), cost.data<scalar_t>());
-  }));
-  THCudaCheck(cudaGetLastError());
-
-  return cost;
+    return cost;
 }
 
 
@@ -354,11 +332,6 @@ __global__ void matchcostgrad1(int b,int n,int m,const scalar_t * __restrict__ g
 	}
 }
 
-//void matchcostgradLauncher(int b,int n,int m,const scalar_t * xyz1,const scalar_t * xyz2,const scalar_t * match,scalar_t * grad1,scalar_t * grad2){
-//	matchcostgrad1<<<32,512>>>(b,n,m,xyz1,xyz2,match,grad1);
-//	matchcostgrad2<<<dim3(32,32),256>>>(b,n,m,xyz1,xyz2,match,grad2);
-//}
-
 
 /* MatchCost backward interface
 Input:
@@ -370,31 +343,35 @@ Output:
   grad1: (B, N1, 3)
   grad2: (B, N2, 3)
 */
-std::vector<at::Tensor> MatchCostBackward(
-    const at::Tensor grad_cost,
-    const at::Tensor xyz1,
-    const at::Tensor xyz2,
-    const at::Tensor match){
-  const auto b = xyz1.size(0);
-  const auto n = xyz1.size(1);
-  const auto m = xyz2.size(1);
+std::vector<at::Tensor> match_cost_cuda_backward(const at::Tensor grad_cost, const at::Tensor xyz1, const at::Tensor xyz2, const at::Tensor match) {
+    const auto b = xyz1.size(0);
+    const auto n = xyz1.size(1);
+    const auto m = xyz2.size(1);
 
-  CHECK_EQ(xyz2.size(0), b);
-  CHECK_EQ(xyz1.size(2), 3);
-  CHECK_EQ(xyz2.size(2), 3);
-  CHECK_INPUT(xyz1);
-  CHECK_INPUT(xyz2);
+    auto grad1 = at::zeros({b, n, 3}, xyz1.type());
+    auto grad2 = at::zeros({b, m, 3}, xyz2.type());
 
-  auto grad1 = at::zeros({b, n, 3}, xyz1.type());
-  auto grad2 = at::zeros({b, m, 3}, xyz1.type());
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Half, xyz1.scalar_type(), "match_cost_backward_cuda", ([&] {
+        matchcostgrad1<scalar_t><<<32,512>>>(
+            b,
+            n,
+            m,
+            grad_cost.data<scalar_t>(),
+            xyz1.data<scalar_t>(),
+            xyz2.data<scalar_t>(),
+            match.data<scalar_t>(),
+            grad1.data<scalar_t>());
+        matchcostgrad2<scalar_t><<<dim3(32,32),256>>>(
+            b,
+            n,
+            m,
+            grad_cost.data<scalar_t>(),
+            xyz1.data<scalar_t>(),
+            xyz2.data<scalar_t>(),
+            match.data<scalar_t>(),
+            grad2.data<scalar_t>());
+    }));
+    THCudaCheck(cudaGetLastError());
 
-  AT_DISPATCH_FLOATING_TYPES(xyz1.scalar_type(), "MatchCostBackward", ([&] {
-        matchcostgrad1<scalar_t><<<32,512>>>(b, n, m, grad_cost.data<scalar_t>(), xyz1.data<scalar_t>(), xyz2.data<scalar_t>(), match.data<scalar_t>(), grad1.data<scalar_t>());
-        matchcostgrad2<scalar_t><<<dim3(32,32),256>>>(b, n, m, grad_cost.data<scalar_t>(), xyz1.data<scalar_t>(), xyz2.data<scalar_t>(), match.data<scalar_t>(), grad2.data<scalar_t>());
-  }));
-  THCudaCheck(cudaGetLastError());
-
-  return std::vector<at::Tensor>({grad1, grad2});
+    return {grad1, grad2};
 }
-
-#endif

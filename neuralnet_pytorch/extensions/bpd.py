@@ -1,5 +1,5 @@
-import batch_pairwise_distance_cpp
+import neuralnet_pytorch.ext as ext
 
 __all__ = ['batch_pairwise_dist']
 
-batch_pairwise_dist = batch_pairwise_distance_cpp.forward
+batch_pairwise_dist = ext.bpd_forward

@@ -1,16 +1,10 @@
-#include <torch/torch.h>
 #include <vector>
 
+#include "pc2vox.h"
+#include "utils.h"
 
-torch::Tensor ravel_index(at::Tensor indices, at::Tensor shape) {
-    torch::Tensor linear = torch::zeros({indices.size(0), 1}).to(indices.device().type()).to(torch::kLong);
-    for (int i = 0; i < indices.size(1); ++i)
-        linear = linear + indices.slice(1, i, i+1) * at::prod(shape.slice(0, i+1, shape.size(0)));
 
-    return linear.flatten();
-}
-
-torch::Tensor pointcloud_to_voxel_cpp(torch::Tensor pc, int voxel_size, float grid_size, bool filter_outlier) {
+torch::Tensor pointcloud_to_voxel_forward(torch::Tensor pc, int voxel_size, float grid_size, bool filter_outlier) {
     auto b = pc.size(0), n = pc.size(1);
     float half_size = grid_size / 2.;
     auto valid = torch::ones({b * n}).to(pc.device().type()).to(torch::kLong);
@@ -33,9 +27,9 @@ torch::Tensor pointcloud_to_voxel_cpp(torch::Tensor pc, int voxel_size, float gr
         indices = indices.index(valid);
     }
 
-    std::vector<int64_t> shape{b, voxel_size, voxel_size, voxel_size};
-    at::Tensor output_shape = torch::tensor(shape).to(pc.device().type()).to(torch::kLong);
-    auto voxel = torch::zeros(shape).to(pc.device().type()).flatten();
+    std::vector<int64_t> output_shape{b, voxel_size, voxel_size, voxel_size};
+    at::Tensor output_shape_tensor = torch::tensor(output_shape).to(pc.device().type()).to(torch::kLong);
+    auto voxel = torch::zeros(output_shape, pc.type()).flatten();
     for (int k=0; k < 2; ++k) {
         for (int j=0; j < 2; ++j) {
             for (int i=0; i < 2; ++i) {
@@ -48,17 +42,12 @@ torch::Tensor pointcloud_to_voxel_cpp(torch::Tensor pc, int voxel_size, float gr
                 at::Tensor indices_shift = torch::tensor(shift).to(pc.device().type()).to(torch::kLong).unsqueeze(0);
                 auto indices_tmp = indices + indices_shift;
 
-                auto linear_indices = ravel_index(indices_tmp, output_shape);
+                auto linear_indices = ravel_index(indices_tmp, output_shape_tensor);
                 voxel = scatter_add(voxel, 0, linear_indices, updates);
             }
         }
     }
-    voxel = voxel.reshape(shape);
+    voxel = voxel.reshape(output_shape);
     voxel = at::clamp(voxel, 0., 1.);
     return voxel;
-}
-
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("forward", &pointcloud_to_voxel_cpp, "pointcloud to voxel forward");
 }

@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import os
 import versioneer
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension, CppExtension
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 version_data = versioneer.get_versions()
 CMD_CLASS = versioneer.get_cmdclass()
@@ -21,11 +21,20 @@ if version_data['error'] is not None:
     version_data['version'] = FALLBACK_VERSION
 
 
+def get_extensions():
+    import glob
+    ext_root = 'neuralnet_pytorch/extensions'
+    ext_src = glob.glob(os.path.join(ext_root, 'src/*.cpp')) + glob.glob(os.path.join(ext_root, 'src/*.cu'))
+    ext_include = os.path.join(ext_root, 'include')
+    return ext_src, ext_include
+
+
 def setup_package():
     here = os.path.abspath(os.path.dirname(__file__))
     with open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
 
+    ext_src, ext_include = get_extensions()
     setup(
         name='neuralnet-pytorch',
         version=version_data['version'],
@@ -49,20 +58,11 @@ def setup_package():
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs']),
         ext_modules=[
-            CUDAExtension('chamfer', [
-                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer_cuda.cpp',
-                'neuralnet_pytorch/extensions/cuda/chamfer_c/chamfer.cu'
-            ]),
-            CUDAExtension('emd_cuda', [
-                'neuralnet_pytorch/extensions/cuda/emd_c/emd.cpp',
-                'neuralnet_pytorch/extensions/cuda/emd_c/emd_kernel.cu'
-            ]),
-            CppExtension('batch_pairwise_distance_cpp', [
-                'neuralnet_pytorch/extensions/cpp/bpd/bpd.cpp'
-            ]),
-            CppExtension('pointcloud_to_voxel_cpp', [
-                'neuralnet_pytorch/extensions/cpp/pc2vox/pc2vox.cpp'
-            ])
+            CUDAExtension(
+                name='neuralnet_pytorch.ext',
+                sources=ext_src,
+                include_dirs=[ext_include]
+            )
         ],
         cmdclass=CMD_CLASS,
         install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],

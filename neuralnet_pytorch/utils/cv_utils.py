@@ -162,6 +162,7 @@ def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, 
     :return:
         the voxel representation of input.
     """
+
     assert pc.ndimension() in (2, 3), 'Point cloud must be a 2D a 3D tensor'
     if pc.ndimension() == 2:
         pc = pc[None]

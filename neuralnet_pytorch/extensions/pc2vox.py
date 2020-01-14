@@ -1,5 +1,5 @@
-import pointcloud_to_voxel_cpp
+import neuralnet_pytorch.ext as ext
 
 __all__ = ['pc2vox']
 
-pc2vox = pointcloud_to_voxel_cpp.forward
+pc2vox = ext.pc2vox_forward
