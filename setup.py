@@ -47,11 +47,12 @@ def setup_package():
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs']),
         cmdclass=CMD_CLASS,
-        install_requires=['visdom', 'matplotlib', 'scipy', 'numpy', 'slackclient', 'tb-nightly',
-                          'imageio', 'future', 'tensorboardX'],
+        install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],
         extras_require={
             'gin': ['gin-config'],
-            'emd': ['pykeops', 'geomloss']
+            'emd': ['pykeops', 'geomloss'],
+            'visdom': ['visdom'],
+            'slack': ['slackclient']
         },
         project_urls={
             'Bug Reports': 'https://github.com/justanhduc/neuralnet-pytorch/issues',

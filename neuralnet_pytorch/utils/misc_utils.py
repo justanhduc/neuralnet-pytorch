@@ -2,11 +2,6 @@ import torch as T
 
 from . import root_logger
 
-try:
-    from slackclient import SlackClient
-except (ModuleNotFoundError, ImportError):
-    from slack import RTMClient as SlackClient
-
 __all__ = ['time_cuda_module', 'slack_message']
 
 
@@ -56,6 +51,11 @@ def slack_message(username: str, message: str, channel: str, token: str, **kwarg
     :return:
         ``None``.
     """
+
+    try:
+        from slackclient import SlackClient
+    except (ModuleNotFoundError, ImportError):
+        from slack import RTMClient as SlackClient
 
     sc = SlackClient(token)
     sc.api_call('chat.postMessage', channel=channel, text=message, username=username, **kwargs)
