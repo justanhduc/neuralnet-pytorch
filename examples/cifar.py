@@ -71,7 +71,7 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
     assert dataset in ('cifar10', 'cifar100')
 
     stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem)
+    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
     net = net.to(device)
 
     optimizer = optimizer(net.trainable, lr=lr, momentum=momentum, weight_decay=weight_decay)
@@ -217,7 +217,7 @@ def evaluate(model, dataset, states, bs=128, use_jit=True, use_amp=False, opt_le
     assert dataset in ('cifar10', 'cifar100')
 
     stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem)
+    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
     net.load_state_dict(states['model_state_dict'])
     net = net.to(eval_device)
     net.eval()
@@ -259,7 +259,7 @@ def test(name, model, dataset, bs=128, print_freq=1000, checkpoint_folder=None, 
     assert dataset in ('cifar10', 'cifar100')
 
     stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem)
+    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
     net = net.to(device)
     net.eval()
 

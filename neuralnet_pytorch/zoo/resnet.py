@@ -28,7 +28,7 @@ class ResNet(nnt.Sequential):
 
     def __init__(self, block, layers, num_classes=1000, zero_init_residual=False,
                  groups=1, width_per_group=64, replace_stride_with_dilation=None,
-                 norm_layer=None, stem=None):
+                 norm_layer=None, stem=None, default_init=True):
         super(ResNet, self).__init__(input_shape=3)
         if norm_layer is None:
             norm_layer = nnt.BatchNorm2d
@@ -64,12 +64,13 @@ class ResNet(nnt.Sequential):
         self.avgpool = nnt.GlobalAvgPool2D()
         self.fc = nnt.FC(512 * block.expansion, num_classes)
 
-        for m in self.modules():
-            if isinstance(m, nnt.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, (nnt.BatchNorm2d, nnt.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
+        if default_init:
+            for m in self.modules():
+                if isinstance(m, nnt.Conv2d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                elif isinstance(m, (nnt.BatchNorm2d, nnt.GroupNorm)):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
 
         # Zero-initialize the last BN in each residual branch,
         # so that the residual branch starts with zeros, and each residual block behaves like an identity.
