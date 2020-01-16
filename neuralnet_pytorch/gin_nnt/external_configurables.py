@@ -4,6 +4,7 @@ import torch.nn as nn
 from gin import config
 
 import neuralnet_pytorch as nnt
+from neuralnet_pytorch import zoo
 
 # optimizers
 config.external_configurable(optim.SGD, 'sgd', module='T.optim')
@@ -90,3 +91,15 @@ config.constant('long', T.long)
 config.constant('half', T.half)
 config.constant('uint8', T.uint8)
 config.constant('int', T.int)
+
+# model zoo
+config.external_configurable(zoo.ResNet, 'ResNet', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet18, 'resnet18', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet34, 'resnet34', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet50, 'resnet50', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet101, 'resnet101', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet152, 'resnet152', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnext50_32x4d, 'resnext50_32x4d', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnext101_32x8d, 'resnext101_32x8d', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.wide_resnet50_2, 'wide_resnet50_2', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.wide_resnet101_2, 'wide_resnet101_2', module='neuralnet_pytorch.zoo.resnet')

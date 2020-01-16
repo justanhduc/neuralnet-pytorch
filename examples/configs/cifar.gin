@@ -1,0 +1,24 @@
+Classifier.name = 'resnet'
+Classifier.model = @resnet50
+Classifier.dataset = 'cifar10'
+
+Classifier.optimizer = @sgd
+Classifier.scheduler = @multistep_lr
+Classifier.lr = 1e-1
+Classifier.weight_decay = 5e-4
+Classifier.momentum = 0.9
+Classifier.gamma = .1
+Classifier.milestones = (150, 250)
+
+Classifier.bs = 128
+Classifier.n_epochs = 300
+Classifier.start_epoch = 0
+Classifier.print_freq = 100
+Classifier.val_freq = 200
+
+Classifier.use_jit = False
+Classifier.use_amp = False
+Classifier.opt_level='O1'
+
+Classifier.checkpoint_folder = None
+Classifier.version = -1
