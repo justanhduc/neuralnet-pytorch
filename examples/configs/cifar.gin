@@ -2,8 +2,8 @@ Classifier.name = 'resnet'
 Classifier.model = @resnet50
 Classifier.dataset = 'cifar10'
 
-Classifier.optimizer = @sgd
-Classifier.scheduler = @multistep_lr
+Classifier.optimizer = @fusedsgd  # sgd or fusedsgd
+Classifier.scheduler = @multistep_lr  # None or multistep_lr
 Classifier.lr = 1e-1
 Classifier.weight_decay = 5e-4
 Classifier.momentum = 0.9

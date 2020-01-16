@@ -38,6 +38,7 @@ from .utils import root_logger, log_formatter
 __all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
 hooks = {}
+lock = threading.Lock()
 
 
 def track(name, x, direction=None):
@@ -1092,6 +1093,7 @@ class Monitor:
             fig.clear()
         plt.close('all')
 
+        lock.acquire()
         with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
             dump_dict = {'iter': it,
                          'epoch': epoch,
@@ -1102,6 +1104,7 @@ class Monitor:
 
             pkl.dump(dump_dict, f, pkl.HIGHEST_PROTOCOL)
             f.close()
+        lock.release()
 
         iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
                                                                 (it % self.num_iters) / self.num_iters * 100.,
