@@ -231,6 +231,7 @@ class Monitor:
     hist_folder
         path to the folder containing the collected histograms.
     """
+    __initialized = False
 
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
                  use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
@@ -362,6 +363,14 @@ class Monitor:
         # schedule to flush when the program finishes
         atexit.register(self._atexit)
         root_logger.info('Result folder: %s' % self.current_folder)
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and attr in ('model_name', 'root', 'current_folder'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super().__setattr__(attr, val)
 
     def _get_new_folder(self):
         runs = [folder for folder in os.listdir(self.path) if folder.startswith(self._prefix)]
@@ -596,7 +605,7 @@ class Monitor:
         self._options[name][option] = value
 
     def run_training(self, net, optim, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
-                     train_stats_func=None, val_stats_func=None, *args, **kwargs):
+                     train_stats_func=None, val_stats_func=None, device=0, *args, **kwargs):
         """
         Runs the training loop for the given neural network.
 
@@ -623,6 +632,8 @@ class Monitor:
             a custom function to handle statistics returned from the validation procedure.
             If ``None``, a default handler will be used.
             For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param device:
+            device to perform calculation.
         :param args:
             additional arguments that will be passed to neural net.
         :param kwargs:
@@ -682,6 +693,7 @@ class Monitor:
             'pointclouds': self.scatter
         }
 
+        net = net.to(device)
         start_epoch = self.epoch if start_epoch is None else start_epoch
         for epoch in self.iter_epoch(range(start_epoch, n_epochs)):
             if optim['scheduler'] is not None:
@@ -692,8 +704,7 @@ class Monitor:
 
             for it, batch in self.iter_batch(enumerate(train_loader)):
                 net.train(True)
-                if utils.cuda_available:
-                    batch = utils.batch_to_cuda(batch)
+                batch = utils.batch_to_device(batch, device=device)
 
                 net.learn(optim, *batch, *args, **kwargs)
 
@@ -719,8 +730,7 @@ class Monitor:
                             }
 
                             for itt, batch in enumerate(eval_loader):
-                                if utils.cuda_available:
-                                    batch = utils.batch_to_cuda(batch)
+                                batch = utils.batch_to_device(batch, device=device)
 
                                 try:
                                     net.eval_procedure(*batch, *args, **kwargs)
