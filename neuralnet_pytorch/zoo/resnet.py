@@ -64,12 +64,12 @@ class ResNet(nnt.Sequential):
         self.avgpool = nnt.GlobalAvgPool2D()
         self.fc = nnt.FC(512 * block.expansion, num_classes)
 
-        # for m in self.modules():
-        #     if isinstance(m, nnt.Conv2d):
-        #         nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-        #     elif isinstance(m, (nnt.BatchNorm2d, nnt.GroupNorm)):
-        #         nn.init.constant_(m.weight, 1)
-        #         nn.init.constant_(m.bias, 0)
+        for m in self.modules():
+            if isinstance(m, nnt.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nnt.BatchNorm2d, nnt.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
         # Zero-initialize the last BN in each residual branch,
         # so that the residual branch starts with zeros, and each residual block behaves like an identity.
