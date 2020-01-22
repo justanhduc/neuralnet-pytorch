@@ -45,7 +45,7 @@ def setup_package():
             'Programming Language :: Python :: 3.7'
         ],
         platforms=['Windows', 'Linux'],
-        packages=find_packages(exclude=['docs']),
+        packages=find_packages(exclude=['docs', 'tests', 'examples']),
         cmdclass=CMD_CLASS,
         install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],
         extras_require={

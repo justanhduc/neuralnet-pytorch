@@ -1,4 +1,3 @@
 include *.md
 include LICENSE.txt
-include neuralnet_pytorch/_version.py
 include versioneer.py

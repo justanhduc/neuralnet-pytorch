@@ -63,7 +63,8 @@ cfgs = {
 
 def _vgg(arch, cfg, batch_norm, pretrained, progress, **kwargs):
     if pretrained:
-        kwargs['init_weights'] = False
+        kwargs['default_init'] = False
+
     model = VGG(make_layers(cfgs[cfg], batch_norm=batch_norm), **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
