@@ -23,14 +23,13 @@ install:
   - source activate pyenv
   - conda install -y pytorch-cpu torchvision-cpu -c pytorch
   - pip install pytest
+  - pip install flake8
   - pip install -r requirements.txt
   - pip install .
 
 jobs:
   - &normaltest
     stage: test
-    python: "3.4"
-  - <<: *normaltest
     python: "3.5"
   - <<: *normaltest
     python: "3.6"
@@ -47,6 +46,7 @@ script:
   - python -c 'import torch; print(torch.__version__)'
   - python -c 'import neuralnet_pytorch; print(neuralnet_pytorch.__version__)'
   - python -m pytest -sv tests/
+  - flake8 neuralnet_pytorch
 
 after_failure:
 - cat /home/travis/.pip/pip.log
