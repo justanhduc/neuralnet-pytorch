@@ -3,7 +3,8 @@ import torch.optim as optim
 import torch.nn as nn
 from gin import config
 
-import neuralnet_pytorch as nnt
+from .. import optim as nnt_optim
+from .. import zoo
 
 # optimizers
 config.external_configurable(optim.SGD, 'sgd', module='T.optim')
@@ -17,9 +18,9 @@ config.external_configurable(optim.ASGD, 'asgd', module='T.optim')
 config.external_configurable(optim.LBFGS, 'lbfgs', module='T.optim')
 config.external_configurable(optim.RMSprop, 'rmsprop', module='T.optim')
 config.external_configurable(optim.Rprop, 'rprop', module='T.optim')
-config.external_configurable(nnt.optim.AdaBound, 'adabound', module='nnt')
-config.external_configurable(nnt.optim.Lookahead, 'lookahead', module='nnt')
-config.external_configurable(nnt.optim.NAdam, 'nadam', module='nnt')
+config.external_configurable(nnt_optim.AdaBound, 'adabound', module='nnt')
+config.external_configurable(nnt_optim.Lookahead, 'lookahead', module='nnt')
+config.external_configurable(nnt_optim.NAdam, 'nadam', module='nnt')
 
 try:
     import apex
@@ -39,8 +40,8 @@ config.external_configurable(optim.lr_scheduler.ExponentialLR, 'exp_lr', module=
 config.external_configurable(optim.lr_scheduler.CosineAnnealingLR, 'cosine_lr', module='T.optim.lr_scheduler')
 config.external_configurable(optim.lr_scheduler.ReduceLROnPlateau, 'plateau_lr', module='T.optim.lr_scheduler')
 config.external_configurable(optim.lr_scheduler.CyclicLR, 'cyclic_lr', module='T.optim.lr_scheduler')
-config.external_configurable(nnt.optim.lr_scheduler.InverseLR, 'inverse_lr')
-config.external_configurable(nnt.optim.lr_scheduler.WarmRestart, 'warm_restart')
+config.external_configurable(nnt_optim.lr_scheduler.InverseLR, 'inverse_lr')
+config.external_configurable(nnt_optim.lr_scheduler.WarmRestart, 'warm_restart')
 
 # losses
 config.external_configurable(nn.L1Loss, 'l1loss', module='T.nn')
@@ -90,3 +91,24 @@ config.constant('long', T.long)
 config.constant('half', T.half)
 config.constant('uint8', T.uint8)
 config.constant('int', T.int)
+
+# model zoo
+config.external_configurable(zoo.ResNet, 'resnet', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet18, 'resnet18', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet34, 'resnet34', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet50, 'resnet50', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet101, 'resnet101', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnet152, 'resnet152', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnext50_32x4d, 'resnext50_32x4d', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.resnext101_32x8d, 'resnext101_32x8d', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.wide_resnet50_2, 'wide_resnet50_2', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.wide_resnet101_2, 'wide_resnet101_2', module='neuralnet_pytorch.zoo.resnet')
+config.external_configurable(zoo.VGG, 'vgg', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg11, 'vgg11', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg11_bn, 'vgg11_bn', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg13, 'vgg13', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg13_bn, 'vgg13_bn', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg16, 'vgg16', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg16_bn, 'vgg16_bn', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg19, 'vgg19', module='neuralnet_pytorch.zoo.vgg')
+config.external_configurable(zoo.vgg19_bn, 'vgg19_bn', module='neuralnet_pytorch.zoo.vgg')

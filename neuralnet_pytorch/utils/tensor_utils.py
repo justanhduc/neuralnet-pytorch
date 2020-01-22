@@ -461,6 +461,7 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=True):
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
+
     assert x.ndimension() in (2, 3) and y.ndimension() in (2, 3), \
         'Input point clouds must be 2D or 3D tensors'
     if x.ndimension() == 2:

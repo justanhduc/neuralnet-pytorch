@@ -1,0 +1,24 @@
+Classifier.name = 'resnet'
+Classifier.model = @resnet101
+Classifier.dataset = 'cifar10'
+
+Classifier.optimizer = @sgd  # fused* works only on gpu0 due to NVIDIA's bug https://github.com/NVIDIA/apex/issues/319
+Classifier.scheduler = @multistep_lr
+Classifier.lr = 1e-3
+Classifier.weight_decay = 5e-4
+Classifier.momentum = 0.9
+Classifier.gamma = .1
+Classifier.milestones = (50, 75)
+
+Classifier.bs = 32
+Classifier.n_epochs = 100
+Classifier.start_epoch = None
+Classifier.print_freq = 500
+Classifier.val_freq = 500
+
+Classifier.use_jit = False
+Classifier.use_amp = False  # works only on gpu0 due to NVIDIA's bug https://github.com/NVIDIA/apex/issues/319
+Classifier.opt_level='O1'
+
+Classifier.checkpoint_folder = None
+Classifier.version = -1

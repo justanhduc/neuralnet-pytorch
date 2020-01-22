@@ -8,7 +8,6 @@ from torch.nn.modules.utils import _pair
 
 from .. import utils
 from ..utils import _image_shape, _matrix_shape, _pointset_shape
-from ..utils import cuda_available
 
 __all__ = ['Conv2d', 'ConvNormAct', 'ConvTranspose2d', 'StackingConv', 'ResNetBasicBlock', 'FC', 'wrapper',
            'ResNetBottleneckBlock', 'Activation', 'Sequential', 'Lambda', 'Module', 'Softmax', 'Sum', 'XConv',
@@ -172,10 +171,6 @@ class _LayerMethod:
 
         assert not hasattr(super(), 'load')
         params_dict = T.load(param_file)
-        if cuda_available:
-            params_cuda = utils.bulk_to_cuda(params_dict.values())
-            params_dict = OrderedDict(zip(list(params_dict.keys()), params_cuda))
-
         self.load_state_dict(params_dict)
         if eval:
             self.eval()
@@ -403,11 +398,7 @@ def wrapper(input_shape=None, output_shape=None, *args, **kwargs):
             def __init__(self):
                 self.input_shape = input_shape
                 self.output_shape_tmp = output_shape
-                device = kwargs.pop('device', None)
-
                 super().__init__(*args, **kwargs)
-                if cuda_available:
-                    self.cuda(device)
 
             def forward(self, input, *args, **kwargs):
                 return super().forward(input, *args, **kwargs)
@@ -424,8 +415,10 @@ def wrapper(input_shape=None, output_shape=None, *args, **kwargs):
                     none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
                     shape = [1 if s is None else s for s in self.input_shape]
                     dummy = T.zeros(*shape)
-                    if cuda_available:
-                        dummy.cuda()
+                    try:
+                        dummy = dummy.to(next(self.parameters()).device)
+                    except StopIteration:
+                        pass
 
                     dummy = self(dummy)
                     output_shape = list(dummy.shape)
@@ -509,8 +502,11 @@ class Lambda(Module):
             none_indices = [k for k in range(len(self.input_shape)) if self.input_shape[k] is None]
             shape = [1 if s is None else s for s in self.input_shape]
             dummy = T.zeros(*shape)
-            if cuda_available:
-                dummy.cuda()
+            try:
+                dummy = dummy.to(next(self.parameters()).device)
+            except StopIteration:
+                pass
+
             dummy = self.forward(dummy)
             output_shape = list(dummy.shape)
             for k in none_indices:
@@ -595,9 +591,6 @@ class Conv2d(nn.Conv2d, _LayerMethod):
 
         super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, tuple(padding), dilation, bias=bias,
                          groups=groups)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
         if self.border_mode in ('ref', 'rep'):
@@ -705,9 +698,6 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
         super().__init__(int(input_shape[1]), out_channels, kernel_size, stride, padding, output_padding, groups, bias,
                          dilation)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def forward(self, input, output_size=None, *args, **kwargs):
         output = self.activation(super().forward(
             input, output_size=self.output_size if output_size is None else output_size))
@@ -786,11 +776,7 @@ class FC(nn.Linear, _LayerMethod):
         self.flatten = flatten
         self.keepdim = keepdim
         self.activation = utils.function(activation, **kwargs)
-
         super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
         if self.flatten:
@@ -872,9 +858,6 @@ class Activation(Module):
         super().__init__(input_shape)
         self.activation = utils.function(activation, **kwargs)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def forward(self, input, *args, **kwargs):
         return self.activation(input)
 
@@ -937,7 +920,7 @@ class ConvNormAct(Sequential):
         statistics in both training and eval modes. Default: ``True``.
     no_scale: bool
         whether to use a trainable scale parameter. Default: ``True``.
-    norm_method
+    norm_layer
         normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
         Default: ``'bn'``.
     kwargs
@@ -946,9 +929,9 @@ class ConvNormAct(Sequential):
 
     def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1, bias=True,
                  activation='relu', weights_init=None, bias_init=None, eps=1e-5, momentum=0.1, affine=True,
-                 track_running_stats=True, no_scale=False, norm_method='bn', **kwargs):
+                 track_running_stats=True, no_scale=False, norm_layer='bn', **kwargs):
         super().__init__(input_shape=input_shape)
-        from neuralnet_pytorch.layers.normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
+        from .normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
 
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -956,18 +939,19 @@ class ConvNormAct(Sequential):
         self.stride = stride
         self.dilation = dilation
         self.activation = utils.function(activation, **kwargs)
-        self.norm_method = norm_method
+        self.norm_layer = norm_layer
         self.conv = Conv2d(input_shape, out_channels, kernel_size, weights_init=weights_init, bias=bias,
                            bias_init=bias_init, padding=padding, stride=stride, dilation=dilation, activation=None,
                            groups=groups, **kwargs)
 
-        norm_method = BatchNorm2d if norm_method == 'bn' else InstanceNorm2d if norm_method == 'in' \
-            else LayerNorm if norm_method == 'ln' else norm_method
-        self.norm = norm_method(self.conv.output_shape, eps, momentum, affine, track_running_stats,
-                                no_scale=no_scale, activation=self.activation, **kwargs)
+        if isinstance(norm_layer, str):
+            norm_layer = BatchNorm2d if norm_layer == 'bn' else InstanceNorm2d if norm_layer == 'in' \
+                else LayerNorm if norm_layer == 'ln' else norm_layer
+        else:
+            assert callable(norm_layer), 'norm_layer must be an instance of `str` or callable'
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
+        self.norm = norm_layer(self.conv.output_shape, eps, momentum, affine, track_running_stats,
+                               no_scale=no_scale, activation=self.activation, **kwargs)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -1044,7 +1028,7 @@ class FCNormAct(Sequential):
                  flatten=False, keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  no_scale=False, norm_method='bn', **kwargs):
         super().__init__(input_shape=input_shape)
-        from neuralnet_pytorch.layers.normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
+        from .normalization import BatchNorm1d, InstanceNorm1d, LayerNorm, FeatureNorm1d
 
         self.out_features = out_features
         self.flatten = flatten
@@ -1058,9 +1042,6 @@ class FCNormAct(Sequential):
             else LayerNorm if norm_method == 'ln' else FeatureNorm1d if norm_method == 'fn' else norm_method
         self.norm = norm_method(self.fc.output_shape, eps, momentum, affine, track_running_stats,
                                 no_scale=no_scale, activation=self.activation, **kwargs)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def extra_repr(self):
         s = '{in_features}, {out_features}'
@@ -1113,7 +1094,7 @@ class ResNetBasicBlock(Module):
         If ``None``, a simple block as described in the paper is used.
     weights_init
         a kernel initialization method from :mod:`torch.nn.init`.
-    norm_method
+    norm_layer
         normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
         Default: ``'bn'``.
     kwargs
@@ -1129,9 +1110,8 @@ class ResNetBasicBlock(Module):
     expansion = 1
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
-                 downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
+                 base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
         input_shape = _image_shape(input_shape)
-
         super().__init__(input_shape=input_shape)
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -1139,14 +1119,17 @@ class ResNetBasicBlock(Module):
         self.padding = padding
         self.dilation = _pair(dilation)
         self.activation = utils.function(activation, **kwargs)
+        self.base_width = base_width
+        self.width = int(out_channels * (base_width / 64)) * groups
         self.groups = groups
         self.weights_init = weights_init
-        self.norm_method = norm_method
+        self.norm_layer = norm_layer
         self.kwargs = kwargs
 
         self.block = self._make_block() if block is None else block(**kwargs)
         if downsample is not None:
-            assert isinstance(Module, downsample), 'downsample must be an instance of Module, got %s' % type(downsample)
+            assert isinstance(downsample, (Module, Sequential)), \
+                'downsample must be an instance of Module, got %s' % type(downsample)
             self.downsample = downsample
         else:
             if stride > 1 or input_shape[1] != out_channels * self.expansion:
@@ -1155,25 +1138,24 @@ class ResNetBasicBlock(Module):
             else:
                 self.downsample = Lambda(lambda x: x, output_shape=input_shape, input_shape=input_shape)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def _make_block(self):
         block = Sequential(input_shape=self.input_shape)
+        out_channels = self.out_channels if self.expansion == 1 else self.width
         if self.expansion != 1:
-            block.add_module('pre',
-                             ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
-                                         padding=self.padding, weights_init=self.weights_init, groups=self.groups))
+            block.add_module('conv1x1',
+                             ConvNormAct(block.output_shape, out_channels, 1, bias=False,
+                                         padding=self.padding, weights_init=self.weights_init,
+                                         activation=self.activation))
         block.add_module('conv_norm_act_1',
-                         ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
+                         ConvNormAct(block.output_shape, out_channels, self.kernel_size, bias=False,
                                      padding=self.padding, weights_init=self.weights_init, stride=self.stride,
-                                     activation=self.activation, groups=self.groups, norm_method=self.norm_method,
+                                     activation=self.activation, groups=self.groups, norm_layer=self.norm_layer,
                                      **self.kwargs))
         block.add_module('conv_norm_act_2',
                          ConvNormAct(block.output_shape, self.out_channels * self.expansion,
-                                     1 if self.expansion != 1 else self.kernel_size, bias=False, stride=1,
-                                     padding=self.padding, activation=None, groups=self.groups,
-                                     weights_init=self.weights_init, norm_method=self.norm_method, **self.kwargs))
+                                     1 if self.expansion != 1 else self.kernel_size, bias=False, padding=self.padding,
+                                     activation=None, weights_init=self.weights_init, norm_layer=self.norm_layer,
+                                     **self.kwargs))
         return block
 
     def forward(self, input, *args, **kwargs):
@@ -1238,7 +1220,7 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
         If ``None``, a simple block as described in the paper is used.
     weights_init
         a kernel initialization method from :mod:`torch.nn.init`.
-    norm_method
+    norm_layer
         normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
         Default: ``'bn'``.
     kwargs
@@ -1254,10 +1236,10 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
     expansion = 4
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
-                 downsample=None, groups=1, block=None, weights_init=None, norm_method='bn', **kwargs):
+                 base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
         super().__init__(input_shape, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation,
-                         activation=activation, downsample=downsample, groups=groups, block=block,
-                         weights_init=weights_init, norm_method=norm_method, **kwargs)
+                         activation=activation, base_width=base_width, downsample=downsample, groups=groups, block=block,
+                         weights_init=weights_init, norm_layer=norm_layer, **kwargs)
 
 
 @utils.add_custom_repr
@@ -1333,9 +1315,6 @@ class StackingConv(Sequential):
                         conv_layer(input_shape=shape, out_channels=out_channels, bias=bias, groups=groups,
                                    kernel_size=kernel_size, weights_init=weights_init, stride=stride, padding=padding,
                                    dilation=dilation, activation=activation, bias_init=bias_init, **kwargs))
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def extra_repr(self):
         s = ('{input_shape}, {out_channels}, kernel_size={kernel_size}'
@@ -1815,8 +1794,6 @@ class GraphXConv(Module):
             self.register_parameter('mixing_bias', None)
 
         self.reset_parameters()
-        if cuda_available:
-            self.cuda()
 
     def forward(self, input):
         output = utils.dimshuffle(input, self.pattern)

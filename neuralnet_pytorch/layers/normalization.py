@@ -9,7 +9,6 @@ from .layers import (
     MultiSingleInputModule,
     SingleMultiInputModule
 )
-from ..utils import cuda_available
 
 __all__ = ['BatchNorm1d', 'BatchNorm2d', 'LayerNorm', 'InstanceNorm2d', 'AdaIN', 'MultiModuleAdaIN', 'MultiInputAdaIN',
            'FeatureNorm1d', 'InstanceNorm1d', 'GroupNorm']
@@ -66,9 +65,6 @@ class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
             self.weight.requires_grad_(False)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
         output = self.activation(super().forward(input))
@@ -132,9 +128,6 @@ class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def forward(self, input, *args, **kwargs):
         output = self.activation(super().forward(input))
         return output
@@ -185,9 +178,6 @@ class LayerNorm(nn.LayerNorm, _LayerMethod):
         self.activation = utils.function(activation, **kwargs)
         super().__init__(input_shape[1:], eps, elementwise_affine)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def forward(self, input):
         output = super().forward(input)
         return self.activation(output)
@@ -236,9 +226,6 @@ class InstanceNorm1d(nn.InstanceNorm1d, _LayerMethod):
         self.input_shape = input_shape
         self.activation = utils.function(activation, **kwargs)
         super().__init__(input_shape[-1], eps, momentum, affine, track_running_stats)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input):
         output = super().forward(input)
@@ -290,9 +277,6 @@ class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
         self.activation = utils.function(activation, **kwargs)
         super().__init__(input_shape[1], eps, momentum, affine, track_running_stats)
 
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
-
     def forward(self, input):
         output = super().forward(input)
         return self.activation(output)
@@ -331,9 +315,6 @@ class GroupNorm(nn.GroupNorm, _LayerMethod):
         self.input_shape = input_shape
         self.activation = utils.function(activation, **kwargs)
         super().__init__(num_groups, input_shape[1], eps, affine)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input):
         output = super().forward(input)
@@ -518,9 +499,6 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
         if self.no_scale:
             nn.init.constant_(self.weight, 1.)
             self.weight.requires_grad_(False)
-
-        if cuda_available:
-            self.cuda(kwargs.pop('device', None))
 
     def forward(self, input, *args, **kwargs):
         shape = input.shape

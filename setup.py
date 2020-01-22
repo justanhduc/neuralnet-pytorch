@@ -24,7 +24,7 @@ if version_data['error'] is not None:
 def get_extensions():
     import glob
     ext_root = 'neuralnet_pytorch/extensions'
-    ext_src = glob.glob(os.path.join(ext_root, 'src/*.cpp')) + glob.glob(os.path.join(ext_root, 'src/*.cu'))
+    ext_src = glob.glob(os.path.join(ext_root, 'csrc/*.cpp')) + glob.glob(os.path.join(ext_root, 'csrc/*.cu'))
     ext_include = os.path.join(ext_root, 'include')
     return ext_src, ext_include
 

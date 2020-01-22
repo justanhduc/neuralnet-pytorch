@@ -5,6 +5,7 @@
 [![Github - Tag](https://img.shields.io/github/tag/justanhduc/neuralnet-pytorch.svg)](https://github.com/justanhduc/neuralnet-pytorch/releases/tag/rel-0.0.4)
 [![License](https://img.shields.io/github/license/justanhduc/neuralnet-pytorch.svg)](https://github.com/justanhduc/neuralnet-pytorch/blob/master/LICENSE.txt)
 [![Build Status](https://travis-ci.org/justanhduc/neuralnet-pytorch.svg?branch=master)](https://travis-ci.org/justanhduc/neuralnet-pytorch)
+[![Documentation Status](https://readthedocs.org/projects/neuralnet-pytorch/badge/?version=latest)](https://neuralnet-pytorch.readthedocs.io/en/latest/?badge=latest)
 
 __A high level framework for general purpose neural networks in Pytorch.__
 

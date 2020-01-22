@@ -6,8 +6,63 @@ from scipy.stats import truncnorm
 
 from . import root_logger
 
-__all__ = ['DataLoader', 'DataPrefetcher', 'truncated_normal', 'batch_set_value', 'batch_to_cuda', 'bulk_to_cuda',
-           'bulk_to_cuda_sparse', 'bulk_to_numpy', 'to_cuda', 'to_cuda_sparse', 'to_numpy']
+__all__ = ['DataLoader', 'DataPrefetcher', 'truncated_normal', 'batch_set_value', 'bulk_to_cuda', 'bulk_to_cuda_sparse',
+           'bulk_to_numpy', 'to_cuda', 'to_cuda_sparse', 'to_numpy', 'batch_to_device', 'batch_to_cuda',
+           'batch_set_tensor', 'ReadWriteLock']
+
+
+class ReadWriteLock:
+    """
+    A lock object that allows many simultaneous `read locks`, but
+    only one `write lock.`
+    From https://www.oreilly.com/library/view/python-cookbook/0596001673/ch06s04.html.
+    """
+
+    def __init__(self):
+        self._read_ready = threading.Condition(threading.Lock())
+        self._readers = 0
+
+    def acquire_read(self):
+        """
+        Acquire a read lock. Blocks only if a thread has
+        acquired the write lock.
+        """
+
+        self._read_ready.acquire()
+        try:
+            self._readers += 1
+        finally:
+            self._read_ready.release()
+
+    def release_read(self):
+        """
+        Release a read lock.
+        """
+
+        self._read_ready.acquire()
+        try:
+            self._readers -= 1
+            if not self._readers:
+                self._read_ready.notifyAll()
+        finally:
+            self._read_ready.release()
+
+    def acquire_write(self):
+        """
+        Acquire a write lock. Blocks until there are no
+        acquired read or write locks.
+        """
+
+        self._read_ready.acquire()
+        while self._readers > 0:
+            self._read_ready.wait()
+
+    def release_write(self):
+        """
+        Release a write lock.
+        """
+
+        self._read_ready.release()
 
 
 class ThreadsafeIter:
@@ -50,6 +105,7 @@ def threadsafe_generator(generator):
 
     def safe_generator(*agrs, **kwargs):
         return ThreadsafeIter(generator(*agrs, **kwargs))
+
     return safe_generator
 
 
@@ -103,8 +159,6 @@ class DataLoader:
     ----------
     batches
         contains batches of data when iterating over the dataset.
-    _indices
-        contains the indices of samples of the dataset.
     """
     __initialized = False
 
@@ -168,7 +222,7 @@ class DataLoader:
             raise ValueError('{} attribute should not be set after {} is '
                              'initialized'.format(attr, self.__class__.__name__))
 
-        super(DataLoader, self).__setattr__(attr, val)
+        super().__setattr__(attr, val)
 
     def __iter__(self):
         self.batches = self._get_batches()
@@ -287,11 +341,12 @@ class DataPrefetcher:
         an instance of :class:`torch.cuda.Stream`.
     """
 
-    def __init__(self, loader, transform=None):
+    def __init__(self, loader, transform=None, device=T.device('cuda')):
         self._loader = loader
         self.loader = iter(loader)
         self.transform = transform
-        self.stream = T.cuda.Stream()
+        self.device = device
+        self.stream = T.cuda.Stream(device=device)
         self.next_data = None
         self.preload()
 
@@ -307,18 +362,18 @@ class DataPrefetcher:
             return
 
         with T.cuda.stream(self.stream):
-            self.next_data = batch_to_cuda(self.next_data, non_blocking=True)
+            self.next_data = batch_to_device(self.next_data, device=self.device, non_blocking=True)
             if self.transform is not None:
                 self.next_data = self.transform(self.next_data)
 
     @staticmethod
-    def _record_stream(data):
+    def _record_stream(data, device):
         if isinstance(data, T.Tensor):
-            data.record_stream(T.cuda.current_stream())
+            data.record_stream(T.cuda.current_stream(device=device))
         else:
             try:
                 for e in data:
-                    DataPrefetcher._record_stream(e)
+                    DataPrefetcher._record_stream(e, device)
             except (TypeError, AttributeError):
                 root_logger.error('Unknown data type', exc_info=True)
                 raise
@@ -328,9 +383,9 @@ class DataPrefetcher:
             self.preload()
             raise StopIteration
 
-        T.cuda.current_stream().wait_stream(self.stream)
+        T.cuda.current_stream(device=self.device).wait_stream(self.stream)
         data = self.next_data
-        DataPrefetcher._record_stream(data)
+        DataPrefetcher._record_stream(data, self.device)
 
         self.preload()
         return data
@@ -366,13 +421,29 @@ def batch_set_value(params, values):
     :param params:
         a :class:`torch.Tensor`.
     :param values:
+        a :class:`numpy.ndarray` of the same shape as `params`.
+    :return:
+        ``None``.
+    """
+
+    for p, v in zip(params, values):
+        p.data.copy_(T.from_numpy(v).data)
+
+
+def batch_set_tensor(params, values):
+    """
+    Sets values of a tensor to another.
+
+    :param params:
+        a :class:`torch.Tensor`.
+    :param values:
         a :class:`torch.Tensor` of the same shape as `params`.
     :return:
         ``None``.
     """
 
     for p, v in zip(params, values):
-        p.data.copy_(T.from_numpy(v))
+        p.data.copy_(v.data)
 
 
 def to_numpy(x: T.Tensor):
@@ -440,7 +511,7 @@ def bulk_to_cuda(xs, non_blocking=False):
     :param xs:
         a tuple of :class:`numpy.ndarray` s.
     :return:
-        a list/tuple of :class:`torch.Tensor` s.
+        a tuple of :class:`torch.Tensor` s.
     """
 
     return tuple([to_cuda(x, non_blocking=non_blocking) for x in xs])
@@ -459,10 +530,46 @@ def bulk_to_cuda_sparse(xs, non_blocking=False):
     return tuple([to_cuda_sparse(x, non_blocking=non_blocking) for x in xs])
 
 
-def batch_to_cuda(batch, non_blocking=False):
-    assert isinstance(batch, (T.Tensor, list, tuple)), 'Unknownn type of batch'
+def batch_to_device(batch, device=0, non_blocking=False):
+    """
+    Moves a batch to the specified device.
 
-    batch_cuda = batch.cuda(non_blocking=non_blocking) if isinstance(batch, T.Tensor) \
-        else [b.cuda(non_blocking=non_blocking) if not isinstance(b, (list, tuple))
-              else [bb.cuda(non_blocking=non_blocking) for bb in b] for b in batch]
-    return batch_cuda
+    :param batch:
+        a :class:`torch.Tensor` or an iterable of :class:`torch.Tensor`.
+    :param device:
+        the destination of the data.
+        Default: ``0``.
+    :param non_blocking:
+        whether to make the program continue without waiting for the move.
+        Default: False.
+    :return:
+        a copy of the original batch that on the specified device.
+    """
+
+    assert isinstance(device, (int, str, T.device)), 'Unknown type of device'
+    if isinstance(batch, T.Tensor):
+        batch_device = batch.to(device=device, non_blocking=non_blocking)
+    else:
+        try:
+            batch_device = [batch_to_device(b, device, non_blocking) for b in batch]
+        except TypeError:
+            root_logger.error('batch must be a Tensor or iterable', exc_info=True)
+            raise
+
+    return batch_device
+
+
+def batch_to_cuda(batch, non_blocking=False):
+    """
+    Moves a batch to the default CUDA device.
+
+    :param batch:
+        a :class:`torch.Tensor` or an iterable of :class:`torch.Tensor`.
+    :param non_blocking:
+        whether to make the program continue without waiting for the move.
+        Default: False.
+    :return:
+        a copy of the original batch that on the default CUDA device.
+    """
+
+    return batch_to_device(batch, T.device('cuda'), non_blocking)
