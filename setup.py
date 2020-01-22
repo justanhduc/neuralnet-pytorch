@@ -56,7 +56,7 @@ def setup_package():
             'Programming Language :: Python :: 3.7'
         ],
         platforms=['Windows', 'Linux'],
-        packages=find_packages(exclude=['docs']),
+        packages=find_packages(exclude=['docs', 'tests', 'examples']),
         ext_modules=[
             CUDAExtension(
                 name='neuralnet_pytorch.ext',
