@@ -56,3 +56,10 @@ Gin-config
     :maxdepth: 4
 
     gin
+
+Pretrained Networks
+-------------------
+.. toctree::
+    :maxdepth: 4
+
+    zoo

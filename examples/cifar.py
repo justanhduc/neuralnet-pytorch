@@ -8,11 +8,18 @@ from torch.multiprocessing import Queue, Process
 import neuralnet_pytorch as nnt
 import neuralnet_pytorch.gin_nnt as gin
 from inspect import signature
+from glob import glob
+import os
+from packaging import version
+
+if version.parse(T.__version__) < version.parse('1.4.0'):
+    raise ValueError('Expect Pytorch version of at least `1.4.0`')
 
 gin.enter_interactive_mode()
 parser = argparse.ArgumentParser(description='Neuralnet-pytorch CIFAR10 Training')
 parser.add_argument('config', type=str, help='Gin config file to dictate training')
-parser.add_argument('--device', '-d', type=str, default=0, nargs='+', help='device(s) to run training')
+parser.add_argument('--test', action='store_true', help='whether to enter test mode')
+parser.add_argument('--device', '-d', type=str, default=['0'], nargs='+', help='device(s) to run training')
 parser.add_argument('--no-wait-eval', action='store_true', help='whether to use multiprocessing for evaluation')
 parser.add_argument('--eval-device', type=int, default=0, help='device to run evaluation')
 args = parser.parse_args()
@@ -23,6 +30,7 @@ no_wait_eval = args.no_wait_eval
 if no_wait_eval:
     assert eval_device not in device, 'device for evaluation must be different from the one for training'
 
+lock = nnt.utils.ReadWriteLock()
 if nnt.cuda_available:
     T.backends.cudnn.benchmark = True
 
@@ -30,32 +38,17 @@ config_file = args.config
 backup_files = (__file__, config_file)
 
 transform_train = transforms.Compose([
-    transforms.RandomCrop(32, padding=4),
+    transforms.Resize(224),
+    transforms.RandomCrop(224, padding=32),
     transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 transform_test = transforms.Compose([
+    transforms.Resize(224),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
-
-
-def eval_queue(q, ckpt):
-    mon = nnt.Monitor(current_folder=ckpt)
-    while True:
-        item = q.get()
-        if item == 'DONE':
-            break
-        elif item is not None:
-            it = item
-            mon.iter = it
-            states = mon.load('tmp.pt', method='torch')
-            gin.parse_config_file(config_file)
-            loss, accuracy = evaluate(states=states)
-            mon.plot('test-loss', loss)
-            mon.plot('test-accuracy', accuracy)
-            mon.flush()
 
 
 def get_loss(net, images, labels, reduction='mean'):
@@ -69,14 +62,13 @@ def get_loss(net, images, labels, reduction='mean'):
 
 @gin.configurable('Classifier')
 def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay=5e-4, bs=128, n_epochs=300,
-               start_epoch=0, print_freq=1000, val_freq=10000, checkpoint_folder=None, version=-1,
+               start_epoch=None, print_freq=1000, val_freq=10000, checkpoint_folder=None, version=-1,
                use_jit=True, use_amp=False, opt_level='O1', **kwargs):
     assert dataset in ('cifar10', 'cifar100')
     if use_amp:
         import apex
 
-    stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
+    net = model(num_classes=10 if dataset == 'cifar10' else 100, default_init=False)
     net = net.to(device[0])
 
     opt_sig = signature(optimizer)
@@ -87,8 +79,8 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
         sch_kwargs = dict([(k, kwargs[k]) for k in kwargs.keys() if k in sch_sig.parameters.keys()])
         scheduler = scheduler(optimizer, **sch_kwargs)
 
-    dataset = torchvision.datasets.CIFAR10 if dataset == 'cifar10' else torchvision.datasets.CIFAR100
-    train_data = dataset(root='./data', train=True, download=True, transform=transform_train)
+    dataset_ = torchvision.datasets.CIFAR10 if dataset == 'cifar10' else torchvision.datasets.CIFAR100
+    train_data = dataset_(root='./data', train=True, download=True, transform=transform_train)
     train_loader = T.utils.data.DataLoader(train_data, batch_size=bs, shuffle=True, num_workers=5)
 
     if checkpoint_folder is None:
@@ -127,7 +119,7 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
         print('Resume from epoch %d...' % mon.epoch)
 
     if not no_wait_eval:
-        eval_data = dataset(root='./data', train=False, download=True, transform=transform_test)
+        eval_data = dataset_(root='./data', train=False, download=True, transform=transform_test)
         eval_loader = T.utils.data.DataLoader(eval_data, batch_size=bs, shuffle=False, num_workers=2)
 
     if nnt.cuda_available:
@@ -172,26 +164,23 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
         else:
             raise ValueError('NaN encountered!')
 
-        mon.plot('train-loss', nnt.utils.to_numpy(loss))
-        mon.plot('train-accuracy', nnt.utils.to_numpy(accuracy))
+        mon.plot('train-loss', nnt.utils.to_numpy(loss), smooth=.99)
+        mon.plot('train-accuracy', nnt.utils.to_numpy(accuracy), smooth=.99)
         del loss, accuracy
 
     if no_wait_eval:
         q = Queue()
-        eval_proc = Process(target=eval_queue, args=(q, mon.current_folder))
+        eval_proc = Process(target=eval_queue,
+                            args=(q, mon.current_folder, dataset, bs, use_jit, use_amp, opt_level))
         eval_proc.daemon = True
         eval_proc.start()
 
     start_epoch = mon.epoch if start_epoch is None else start_epoch
     print('Training...')
     with T.jit.optimized_execution(use_jit):
-        for epoch in mon.iter_epoch(range(start_epoch, n_epochs)):
-            if scheduler is not None:
-                scheduler.step(epoch)
-
-            opt = scheduler.optimizer if scheduler is not None else optimizer
-            for idx, group in enumerate(opt.param_groups):
-                mon.plot('lr-%d' % idx, group['lr'])
+        for _ in mon.iter_epoch(range(start_epoch, n_epochs)):
+            for idx, lr_ in enumerate(scheduler.get_last_lr()):
+                mon.plot('lr-%d' % idx, lr_, filter_outliers=False)
 
             for batch in mon.iter_batch(train_loader):
                 batch = nnt.utils.batch_to_device(batch, device[0])
@@ -199,8 +188,10 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
                 learn(*batch)
                 if val_freq and mon.iter % val_freq == 0:
                     if no_wait_eval:
+                        lock.acquire_write()
                         mon.dump('tmp.pt', states, method='torch')
-                        q.put(mon.iter)
+                        lock.release_write()
+                        q.put((mon.epoch, mon.iter))
                         q.put(None)
                     else:
                         net.eval()
@@ -216,6 +207,8 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
                             mon.plot('test-loss', np.mean(losses))
                             mon.plot('test-accuracy', np.mean(accuracies))
             mon.dump('training.pt', states, method='torch', keep=10)
+            if scheduler is not None:
+                scheduler.step()
 
     if no_wait_eval:
         q.put('DONE')
@@ -224,15 +217,25 @@ def train_eval(name, model, dataset, optimizer, scheduler, lr=1e-1, weight_decay
     print('Training finished!')
 
 
-@gin.configurable('Classifier')
-def evaluate(model, dataset, states, bs=128, use_jit=True, use_amp=False, opt_level='O1', **kwargs):
+def eval_queue(q, ckpt, dataset, bs, use_jit, use_amp, opt_level):
     assert dataset in ('cifar10', 'cifar100')
 
-    stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
-    net = net.to(eval_device)
-    net.load_state_dict(states['model_state_dict'])
-    net.eval()
+    # TODO: passing `model` this way is ugly
+    @gin.configurable('Classifier')
+    def _make_network(model, **kwargs):
+        net = model(num_classes=10 if dataset == 'cifar10' else 100, default_init=False)
+        net = net.to(eval_device)
+        net.eval()
+        return net
+
+    lock.acquire_read()
+    mon = nnt.Monitor(current_folder=ckpt)
+    lock.release_read()
+
+    cfg = glob(os.path.join(mon.file_folder, '*.gin'))
+    cfg = cfg[0] if len(cfg) == 1 else config_file  # fall back
+    gin.parse_config_file(cfg)
+    net = _make_network()
 
     dataset = torchvision.datasets.CIFAR10 if dataset == 'cifar10' else torchvision.datasets.CIFAR100
     eval_data = dataset(root='./data', train=False, download=True, transform=transform_test)
@@ -241,26 +244,41 @@ def evaluate(model, dataset, states, bs=128, use_jit=True, use_amp=False, opt_le
     if nnt.cuda_available:
         eval_loader = nnt.DataPrefetcher(eval_loader, device=eval_device)
 
-    if use_jit:
-        img = T.rand(1, 3, 32, 32).to(eval_device)
-        net = T.jit.trace(net, img)
+    while True:
+        item = q.get()
+        if item == 'DONE':
+            break
+        elif item is not None:
+            lock.acquire_read()
+            mon.load_state()
+            lock.release_read()
+            mon.epoch, mon.iter = item
+            # TODO: find a better way to load the current state of `monitor`
+            lock.acquire_read()
+            states = mon.load('tmp.pt', method='torch')
+            lock.release_read()
+            net.load_state_dict(states['model_state_dict'])
+            if use_jit:
+                img = T.rand(1, 3, 32, 32).to(eval_device)
+                net = T.jit.trace(net, img)
 
-    if use_amp:
-        import apex
-        net = apex.amp.initialize(net, opt_level=opt_level)
-        apex.amp.load_state_dict(states['amp'])
+            if use_amp:
+                import apex
+                net = apex.amp.initialize(net, opt_level=opt_level)
+                apex.amp.load_state_dict(states['amp'])
 
-    net = T.nn.DataParallel(net, device_ids=[eval_device])
-    with T.set_grad_enabled(False):
-        losses, accuracies = [], []
-        for itt, batch in enumerate(eval_loader):
-            batch = nnt.utils.batch_to_device(batch, eval_device)
+            with T.set_grad_enabled(False):
+                losses, accuracies = [], []
+                for itt, batch in enumerate(eval_loader):
+                    batch = nnt.utils.batch_to_device(batch, eval_device)
 
-            loss, acc = get_loss(net, *batch)
-            losses.append(nnt.utils.to_numpy(loss))
-            accuracies.append(nnt.utils.to_numpy(acc))
+                    loss, acc = get_loss(net, *batch)
+                    losses.append(nnt.utils.to_numpy(loss))
+                    accuracies.append(nnt.utils.to_numpy(acc))
 
-    return np.mean(losses), np.mean(accuracies)
+            mon.plot('test-loss', np.mean(losses))
+            mon.plot('test-accuracy', np.mean(accuracies))
+            mon.flush()
 
 
 @gin.configurable('Classifier')
@@ -268,17 +286,13 @@ def test(name, model, dataset, bs=128, print_freq=1000, checkpoint_folder=None, 
          use_jit=True, use_amp=False, opt_level='O1', **kwargs):
     assert dataset in ('cifar10', 'cifar100')
 
-    stem = nnt.ConvNormAct(3, 64, kernel_size=3, stride=1, padding=1, bias=False, activation='relu')
-    net = model(num_classes=10 if dataset == 'cifar10' else 100, stem=stem, default_init=False)
+    net = model(num_classes=10 if dataset == 'cifar10' else 100, default_init=False)
     net = net.to(device[0])
     net.eval()
 
     dataset = torchvision.datasets.CIFAR10 if dataset == 'cifar10' else torchvision.datasets.CIFAR100
     test_data = dataset(root='./data', train=False, download=True, transform=transform_test)
     test_loader = T.utils.data.DataLoader(test_data, batch_size=bs, shuffle=False, num_workers=5)
-
-    if nnt.cuda_available:
-        test_loader = nnt.DataPrefetcher(test_loader, device=device[0])
 
     mon = nnt.Monitor(current_folder=checkpoint_folder, print_freq=print_freq, num_iters=len(test_data) // bs,
                       use_tensorboard=True)
@@ -309,4 +323,4 @@ def test(name, model, dataset, bs=128, print_freq=1000, checkpoint_folder=None, 
 if __name__ == '__main__':
     mp.set_start_method('spawn')
     gin.parse_config_file(config_file)
-    train_eval()
+    test() if args.test else train_eval()
