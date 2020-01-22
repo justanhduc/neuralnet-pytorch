@@ -1,44 +1,41 @@
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib
-
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib import cm
-
-import atexit
 import threading
 import queue
 import numpy as np
 import collections
 import pickle as pkl
-from imageio import imwrite
 import os
 import time
-from shutil import copyfile
 import torch as T
 import torch.nn as nn
+import atexit
 import logging
+from matplotlib import cm
+from imageio import imwrite
+from shutil import copyfile
 
 try:
     import visdom
-
     visdom_available = True
 except ImportError:
     visdom_available = False
 
 try:
     from torch.utils.tensorboard import SummaryWriter
-except ImportError:
+except ImportError:  # for Pytorch earlier than 1.1.0
     from tensorboardX import SummaryWriter
 
 from . import layers
 from . import utils
 from .utils import root_logger, log_formatter
 
+matplotlib.use('Agg')
 __all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
 hooks = {}
-lock = threading.Lock()
+lock = utils.ReadWriteLock()
 
 
 def track(name, x, direction=None):
@@ -167,13 +164,13 @@ def _spawn_defaultdict_ordereddict():
 class Monitor:
     """
     Collects statistics and displays the results using various backends.
-    The collected stats are stored in '<root>/<model_name>/run<#id>'
+    The collected stats are stored in '<root>/<model_name>/<prefix><#id>'
     where #id is automatically assigned each time a new run starts.
 
     Examples
     --------
-    The following snippet shows how to collect statistics and display them
-    every 100 iterations.
+    The following snippet shows how to plot smoothed training losses and
+    save images from the current iteration, and then display them every 100 iterations.
 
     .. code-block:: python
 
@@ -184,8 +181,8 @@ class Monitor:
         for epoch in mon.iter_epoch(range(n_epochs)):
             for data in mon.iter_batch(data_loader):
                 loss = net(data)
-                mon.plot('training loss', loss)
-                mon.imwrite('input images', data['images'])
+                mon.plot('training loss', loss, smooth=.99, filter_outliers=True)
+                mon.imwrite('input images', data['images'], latest_only=True)
         ...
 
     Parameters
@@ -195,20 +192,29 @@ class Monitor:
     root : str
         path to store the collected statistics.
     current_folder : str
-        if given, all the stats in here will be overwritten or resumed.
+        if given, all the stats will be loaded from the given folder.
+        Default: ``None``.
     print_freq : int
         statistics display frequency.
         Unit is iteration.
+        Default: ``None``.
     num_iters : int
         number of iterations/epoch.
         If specified, training iteration percentage will be displayed along with epoch.
-        Otherwise, it will be automatically calculated after the first epoch.
+        Otherwise, it will be automatically calculated in the first epoch.
+        Default: ``None``.
+    prefix : str
+        predix for folder name of of each run.
+        Default: ``'run'``.
     use_visdom : bool
         whether to use Visdom for real-time monitoring.
+        Default: ``False``.
     use_tensorboard : bool
         whether to use Tensorboard for real-time monitoring.
+        Default: ``False``.
     send_slack : bool
         whether to send the statistics to Slack chatroom.
+        Default: ``False``.
     kwargs
         some miscellaneous options for Visdom and other functions.
 
@@ -235,7 +241,7 @@ class Monitor:
     __initialized = False
 
     def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
-                 use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
+                 prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
         self._iter = 0
         self._last_epoch = 0
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
@@ -252,55 +258,16 @@ class Monitor:
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
-        self._prefix = kwargs.pop('prefix', 'run')
+        self._prefix = prefix
         self._num_iters = num_iters
 
         self.print_freq = print_freq
         self.num_iters = num_iters
         if current_folder:
             self.current_folder = os.path.normpath(current_folder)
-            self.current_run = os.path.basename(self.current_folder)
-
-            try:
-                log = self.read_log('log.pkl')
-                try:
-                    self.num_stats = log['num']
-                except KeyError:
-                    root_logger.warning('No record found for \'num\'', exc_info=True)
-
-                try:
-                    self.hist_stats = log['hist']
-                except KeyError:
-                    root_logger.warning('No record found for \'hist\'', exc_info=True)
-
-                try:
-                    self.options = log['options']
-                except KeyError:
-                    root_logger.warning('No record found for \'options\'', exc_info=True)
-
-                if self.num_iters is None:
-                    try:
-                        self.num_iters = log['num_iters']
-                    except KeyError:
-                        root_logger.warning('No record found for \'num_iters\'', exc_info=True)
-
-                try:
-                    self.epoch = log['epoch']
-                except KeyError:
-                    if self.num_iters:
-                        self.epoch = log['iter'] // self.num_iters
-                    else:
-                        root_logger.warning('No record found for \'epoch\'', exc_info=True)
-
-                try:
-                    self.iter = self.epoch * self.num_iters if self.num_iters else log['iter']
-                except KeyError:
-                    root_logger.warning('No record found for \'iter\'', exc_info=True)
-
-            except FileNotFoundError:
-                root_logger.warning('\'log.pkl\' not found in \'%s\'' % os.path.join(self.current_folder, 'files'),
-                                    exc_info=True)
-
+            lock.acquire_read()
+            self.load_state()
+            lock.release_read()
         else:
             self.path = os.path.join(root, model_name)
             os.makedirs(self.path, exist_ok=True)
@@ -327,7 +294,7 @@ class Monitor:
             self.writer = None
 
         self._q = queue.Queue()
-        self._thread = threading.Thread(target=self._work, daemon=True)
+        self._thread = threading.Thread(target=self._flush, daemon=True)
         self._thread.start()
 
         self.send_slack = send_slack
@@ -373,6 +340,44 @@ class Monitor:
 
         super().__setattr__(attr, val)
 
+    def load_state(self):
+        self.current_run = os.path.basename(self.current_folder)
+
+        try:
+            log = self.read_log('log.pkl')
+            try:
+                self.num_stats = log['num']
+            except KeyError:
+                root_logger.warning('No record found for `num`', exc_info=True)
+
+            try:
+                self.hist_stats = log['hist']
+            except KeyError:
+                root_logger.warning('No record found for `hist`', exc_info=True)
+
+            if self.num_iters is None:
+                try:
+                    self.num_iters = log['num_iters']
+                except KeyError:
+                    root_logger.warning('No record found for `num_iters`', exc_info=True)
+
+            try:
+                self.iter = log['iter']
+            except KeyError:
+                root_logger.warning('No record found for `iter`', exc_info=True)
+
+            try:
+                self.epoch = log['epoch']
+            except KeyError:
+                if self.num_iters:
+                    self.epoch = self.iter // self.num_iters
+                else:
+                    root_logger.warning('No record found for `epoch`', exc_info=True)
+
+        except FileNotFoundError:
+            root_logger.warning('`log.pkl` not found in `%s`' % os.path.join(self.current_folder, 'files'),
+                                exc_info=True)
+
     def _get_new_folder(self):
         runs = [folder for folder in os.listdir(self.path) if folder.startswith(self._prefix)]
         if not runs:
@@ -406,6 +411,9 @@ class Monitor:
         --------
         :meth:`~iter_batch`
         """
+
+        if self.num_iters:
+            self.iter = self.epoch * self.num_iters
 
         for item in iterator:
             if self.epoch > 0 and self.num_iters is None:
@@ -829,7 +837,7 @@ class Monitor:
     def copy_files(self, files):
         self.backup(files)
 
-    def plot(self, name: str, value, **kwargs):
+    def plot(self, name: str, value, smooth=0, filter_outliers=True, **kwargs):
         """
         schedules a plot of scalar value.
         A :mod:`matplotlib` figure will be rendered and saved every :attr:`~print_freq` iterations.
@@ -838,11 +846,21 @@ class Monitor:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             scalar value to be plotted.
+        :param smooth:
+            a value between ``0`` and ``1`` to define the smoothing window size.
+            See :func:`~neuralnet_pytorch.utils.numpy_utils.smooth`.
+            Default: ``0``.
+        :param filter_outliers:
+            whether to filter out outliers in plot.
+            This affects only the plot and not the raw statistics.
+            Default: True.
         :param kwargs:
             additional options to tensorboard.
         :return: ``None``.
         """
 
+        self._options[name]['smooth'] = smooth
+        self._options[name]['filter_outliers'] = filter_outliers
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -867,9 +885,7 @@ class Monitor:
         :return: ``None``.
         """
 
-        if self.iter == 0:
-            self._options[name]['latest_only'] = latest_only
-
+        self._options[name]['latest_only'] = latest_only
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -884,13 +900,19 @@ class Monitor:
         """
         schedules to save images.
         The images will be rendered and saved every :attr:`~print_freq` iterations.
+        There are some assumptions about input data:
+
+        - If the input is ``'uint8'`` it is an 8-bit image.
+        - If the input is ``'float32'``, its values lie between ``0`` and ``1``.
+        - If the input has 3 dims, the shape is ``[h, w, 3]``.
+        - If the channel dim is different from 3 or 1, it will be considered as multiple gray images.
 
         :param name:
             name of the figure to be saved. Must be unique among plots.
         :param value:
             2D, 3D or 4D tensor to be plotted.
-            The expected shape is (H, W) for 2D tensor, (H, W, C) for 3D tensor and
-            (N, C, H, W) for 4D tensor.
+            The expected shape is ``(H, W)`` for 2D tensor, ``(H, W, C)`` for 3D tensor and
+            ``(N, C, H, W)`` for 4D tensor.
             If the number of channels is other than 3 or 1, each channel is saved as
             a gray image.
         :param latest_only:
@@ -900,9 +922,7 @@ class Monitor:
         :return: ``None``.
         """
 
-        if self.iter == 0:
-            self._options[name]['latest_only'] = latest_only
-
+        self._options[name]['latest_only'] = latest_only
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
 
@@ -928,7 +948,7 @@ class Monitor:
         :param name:
             name of the figure to be saved. Must be unique among plots.
         :param value:
-            any-dim tensor to be histogrammed. The last dim should be 3.
+            any-dim tensor to be histogrammed.
         :param n_bins:
             number of bins of the histogram.
         :param latest_only:
@@ -938,12 +958,10 @@ class Monitor:
         :return: ``None``.
         """
 
+        self._options[name]['latest_only'] = latest_only
+        self._options[name]['n_bins'] = n_bins
         if isinstance(value, T.Tensor):
             value = utils.to_numpy(value)
-
-        if self.iter == 0:
-            self._options[name]['latest_only'] = latest_only
-            self._options[name]['n_bins'] = n_bins
 
         self._hist_since_last_flush[name][self.iter] = value
         if self.writer is not None:
@@ -972,16 +990,13 @@ class Monitor:
         self._schedule[when][name]['args'] = args
         self._schedule[when][name]['kwargs'] = kwargs
 
-    def _worker(self, it, epoch, _num_since_last_flush, _img_since_last_flush, _hist_since_last_flush,
-                _pointcloud_since_last_flush):
-        prints = []
-        fig = plt.figure()
-
-        # plot statistics
+    def _plot(self, nums, fig, prints):
         plt.xlabel('iteration')
-        for name, val in list(_num_since_last_flush.items()):
-            self._num_since_beginning[name].update(val)
+        for name, val in list(nums.items()):
+            smooth = self._options[name].get('smooth')
+            filter_outliers = self._options[name].get('filter_outliers')
 
+            self._num_since_beginning[name].update(val)
             plt.ylabel(name)
             x_vals = sorted(self._num_since_beginning[name].keys())
             y_vals = [self._num_since_beginning[name][x] for x in x_vals]
@@ -991,13 +1006,15 @@ class Monitor:
                       .format(max_, x_vals[argmax_], min_, x_vals[argmin_], med_, mean_))
 
             x_vals, y_vals = np.array(x_vals), np.array(y_vals)
-            inlier_indices = ~utils.is_outlier(y_vals)
-            y_vals_filtered = y_vals[inlier_indices]
-            min_, max_ = np.min(y_vals_filtered), np.max(y_vals_filtered)
-            interval = (.9 ** np.sign(min_) * min_, 1.1 ** np.sign(max_) * max_)
-            plt.plot(x_vals, y_vals)
-            if not (np.any(np.isnan(interval)) or np.any(np.isinf(interval))):
-                plt.ylim(interval)
+            y_vals_smoothed = utils.smooth(y_vals, smooth)[:x_vals.shape[0]] if smooth else y_vals
+            plt.plot(x_vals, y_vals_smoothed)
+            if filter_outliers:
+                inlier_indices = ~utils.is_outlier(y_vals)
+                y_vals_filtered = y_vals[inlier_indices]
+                min_, max_ = np.min(y_vals_filtered), np.max(y_vals_filtered)
+                interval = (.9 ** np.sign(min_) * min_, 1.1 ** np.sign(max_) * max_)
+                if not (np.any(np.isnan(interval)) or np.any(np.isinf(interval))):
+                    plt.ylim(interval)
 
             prints.append("{}\t{:.6f}".format(name, np.mean(np.array(list(val.values())), 0)))
             fig.savefig(os.path.join(self.plot_folder, name.replace(' ', '_') + '.jpg'))
@@ -1006,9 +1023,9 @@ class Monitor:
 
             fig.clear()
 
-        # save recorded images
-        for name, val in list(_img_since_last_flush.items()):
-            latest = self._options[name].get('latest_only')
+    def _imwrite(self, imgs):
+        for name, val in list(imgs.items()):
+            latest_only = self._options[name].get('latest_only')
 
             for itt, val in val.items():
                 if len(val.shape) == 4:
@@ -1020,7 +1037,7 @@ class Monitor:
                         if img.shape[0] in (1, 3):
                             img = np.transpose(img, (1, 2, 0))
 
-                            if latest:
+                            if latest_only:
                                 imwrite(os.path.join(self.image_folder,
                                                      name.replace(' ', '_') + '_%d.jpg' % num), img)
                             else:
@@ -1034,27 +1051,23 @@ class Monitor:
                                 img_normed[np.isnan(img_normed)] = 0
                                 img_normed[np.isinf(img_normed)] = 0
 
-                                if latest:
-                                    imwrite(os.path.join(self.image_folder,
-                                                         name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
+                                if latest_only:
+                                    imwrite(os.path.join(
+                                        self.image_folder,
+                                        name.replace(' ', '_') + '_%d_%d.jpg' % (num, ch)), img_normed)
                                 else:
-                                    imwrite(os.path.join(self.image_folder,
-                                                         name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)),
-                                            img_normed)
+                                    imwrite(os.path.join(
+                                        self.image_folder,
+                                        name.replace(' ', '_') + '_%d_%d_%d.jpg' % (itt, num, ch)), img_normed)
                 else:
                     raise NotImplementedError
 
-        # make histograms of recorded data
-        for name, val in list(_hist_since_last_flush.items()):
-            if self.writer is not None:
-                k = max(list(_hist_since_last_flush[name].keys()))
-                self.writer.add_histogram(name, np.array(val[k]).flatten(), global_step=k)
-
-            n_bins = self._options[name].get('n_bins', 20)
-            latest = self._options[name].get('latest_only', False)
-
-            if latest:
-                k = max(list(_hist_since_last_flush[name].keys()))
+    def _hist(self, nums, fig):
+        for name, val in list(nums.items()):
+            n_bins = self._options[name].get('n_bins')
+            latest_only = self._options[name].get('latest_only')
+            if latest_only:
+                k = max(list(nums[name].keys()))
                 plt.hist(np.array(val[k]).flatten(), bins='auto')
             else:
                 self._hist_since_beginning[name].update(val)
@@ -1074,14 +1087,14 @@ class Monitor:
             fig.savefig(os.path.join(self.hist_folder, name.replace(' ', '_') + '_hist.jpg'))
             fig.clear()
 
-        # scatter pointcloud(s)
-        for name, vals in list(_pointcloud_since_last_flush.items()):
-            latest = self._options[name].get('latest_only')
+    def _scatter(self, points, fig):
+        for name, vals in list(points.items()):
+            latest_only = self._options[name].get('latest_only')
             for itt, val in vals.items():
-                for ii in range(val.shape[0]):
+                for ii, v in enumerate(val):
                     ax = fig.add_subplot(111, projection='3d')
-                    ax.scatter(*[val[ii, :, i] for i in range(val.shape[-1])])
-                    if latest:
+                    ax.scatter(*[v[:, i] for i in range(v.shape[-1])])
+                    if latest_only:
                         plt.savefig(
                             os.path.join(self.plot_folder, name.replace(' ', '_') + '_%d.jpg' % (ii + 1)))
                     else:
@@ -1091,43 +1104,55 @@ class Monitor:
                     fig.clear()
                 fig.clear()
             fig.clear()
-        plt.close('all')
 
-        lock.acquire()
-        with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
-            dump_dict = {'iter': it,
-                         'epoch': epoch,
-                         'num_iters': self.num_iters,
-                         'num': dict(self._num_since_beginning),
-                         'hist': dict(self._hist_since_beginning),
-                         'options': dict(self._options)}
-
-            pkl.dump(dump_dict, f, pkl.HIGHEST_PROTOCOL)
-            f.close()
-        lock.release()
-
-        iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
-                                                                (it % self.num_iters) / self.num_iters * 100.,
-                                                                epoch + 1) if self.num_iters \
-            else 'Iteration {} Epoch {}'.format(it, epoch)
-
-        elapsed_time = time.time() - self._timer
-        time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
-        elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
-                                       else elapsed_time / 3600.) + time_unit
-        log = 'Elapsed time {} {}\t{}\t{}'.format(elapsed_time, self.current_run, iter_show, '\t'.join(prints))
-        root_logger.info(log)
-
-        if self.send_slack:
-            message = 'From %s ' % self.current_folder
-            message += log
-            utils.slack_message(message=message, **self.kwargs)
-
-    def _work(self):
+    def _flush(self):
+        fig = plt.figure()
         while True:
             items = self._q.get()
-            work = items[0]
-            work(*items[1:])
+            it, epoch, nums, imgs, hists, points = items
+            prints = []
+
+            # plot statistics
+            self._plot(nums, fig, prints)
+
+            # save recorded images
+            self._imwrite(imgs)
+
+            # make histograms of recorded data
+            self._hist(hists, fig)
+
+            # scatter point set(s)
+            self._scatter(points, fig)
+
+            lock.acquire_write()
+            with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
+                dump_dict = {'iter': it,
+                             'epoch': epoch,
+                             'num_iters': self.num_iters,
+                             'num': dict(self._num_since_beginning),
+                             'hist': dict(self._hist_since_beginning)}
+
+                pkl.dump(dump_dict, f, pkl.HIGHEST_PROTOCOL)
+                f.close()
+            lock.release_write()
+
+            iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
+                                                                    (it % self.num_iters) / self.num_iters * 100.,
+                                                                    epoch + 1) if self.num_iters \
+                else 'Iteration {} Epoch {}'.format(it, epoch)
+
+            elapsed_time = time.time() - self._timer
+            time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
+            elapsed_time = '{:.2f}'.format(elapsed_time / 60. if elapsed_time < 3600.
+                                           else elapsed_time / 3600.) + time_unit
+            log = 'Elapsed time {} {}\t{}\t{}'.format(elapsed_time, self.current_run, iter_show, '\t'.join(prints))
+            root_logger.info(log)
+
+            if self.send_slack:
+                message = 'From %s ' % self.current_folder
+                message += log
+                utils.slack_message(message=message, **self.kwargs)
+
             self._q.task_done()
 
     def flush(self):
@@ -1138,7 +1163,7 @@ class Monitor:
         :return: ``None``.
         """
 
-        self._q.put((self._worker, self.iter, self.epoch, dict(self._num_since_last_flush),
+        self._q.put((self.iter, self.epoch, dict(self._num_since_last_flush),
                      dict(self._img_since_last_flush), dict(self._hist_since_last_flush),
                      dict(self._points_since_last_flush)))
         self._num_since_last_flush.clear()
@@ -1276,7 +1301,8 @@ class Monitor:
                     if file_name in versions:
                         obj = method(os.path.join(self.current_folder, file_name), **kwargs)
                     else:
-                        root_logger.warning('Version %d of %s is not found in %s' % (version, file, self.current_folder))
+                        root_logger.warning(
+                            'Version %d of %s is not found in %s' % (version, file, self.current_folder))
                         return None
         except FileNotFoundError:
             try:

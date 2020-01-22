@@ -1110,9 +1110,8 @@ class ResNetBasicBlock(Module):
     expansion = 1
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
-                 downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
+                 base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
         input_shape = _image_shape(input_shape)
-
         super().__init__(input_shape=input_shape)
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -1120,6 +1119,8 @@ class ResNetBasicBlock(Module):
         self.padding = padding
         self.dilation = _pair(dilation)
         self.activation = utils.function(activation, **kwargs)
+        self.base_width = base_width
+        self.width = int(out_channels * (base_width / 64)) * groups
         self.groups = groups
         self.weights_init = weights_init
         self.norm_layer = norm_layer
@@ -1127,7 +1128,8 @@ class ResNetBasicBlock(Module):
 
         self.block = self._make_block() if block is None else block(**kwargs)
         if downsample is not None:
-            assert isinstance(downsample, (Module, Sequential)), 'downsample must be an instance of Module, got %s' % type(downsample)
+            assert isinstance(downsample, (Module, Sequential)), \
+                'downsample must be an instance of Module, got %s' % type(downsample)
             self.downsample = downsample
         else:
             if stride > 1 or input_shape[1] != out_channels * self.expansion:
@@ -1138,21 +1140,22 @@ class ResNetBasicBlock(Module):
 
     def _make_block(self):
         block = Sequential(input_shape=self.input_shape)
+        out_channels = self.out_channels if self.expansion == 1 else self.width
         if self.expansion != 1:
-            block.add_module('pre',
-                             ConvNormAct(block.output_shape, self.out_channels, 1, stride=1, bias=False,
-                                         padding=self.padding, weights_init=self.weights_init, groups=self.groups,
+            block.add_module('conv1x1',
+                             ConvNormAct(block.output_shape, out_channels, 1, bias=False,
+                                         padding=self.padding, weights_init=self.weights_init,
                                          activation=self.activation))
         block.add_module('conv_norm_act_1',
-                         ConvNormAct(block.output_shape, self.out_channels, self.kernel_size, bias=False,
+                         ConvNormAct(block.output_shape, out_channels, self.kernel_size, bias=False,
                                      padding=self.padding, weights_init=self.weights_init, stride=self.stride,
                                      activation=self.activation, groups=self.groups, norm_layer=self.norm_layer,
                                      **self.kwargs))
         block.add_module('conv_norm_act_2',
                          ConvNormAct(block.output_shape, self.out_channels * self.expansion,
-                                     1 if self.expansion != 1 else self.kernel_size, bias=False, stride=1,
-                                     padding=self.padding, activation=None, groups=self.groups,
-                                     weights_init=self.weights_init, norm_layer=self.norm_layer, **self.kwargs))
+                                     1 if self.expansion != 1 else self.kernel_size, bias=False, padding=self.padding,
+                                     activation=None, weights_init=self.weights_init, norm_layer=self.norm_layer,
+                                     **self.kwargs))
         return block
 
     def forward(self, input, *args, **kwargs):
@@ -1234,9 +1237,8 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
 
     def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
                  base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
-        width = int(out_channels * (base_width / 64)) * groups
-        super().__init__(input_shape, width, kernel_size, stride=stride, padding=padding, dilation=dilation,
-                         activation=activation, downsample=downsample, groups=groups, block=block,
+        super().__init__(input_shape, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation,
+                         activation=activation, base_width=base_width, downsample=downsample, groups=groups, block=block,
                          weights_init=weights_init, norm_layer=norm_layer, **kwargs)
 
 

@@ -7,7 +7,62 @@ from scipy.stats import truncnorm
 from . import root_logger
 
 __all__ = ['DataLoader', 'DataPrefetcher', 'truncated_normal', 'batch_set_value', 'bulk_to_cuda', 'bulk_to_cuda_sparse',
-           'bulk_to_numpy', 'to_cuda', 'to_cuda_sparse', 'to_numpy', 'batch_to_device', 'batch_to_cuda']
+           'bulk_to_numpy', 'to_cuda', 'to_cuda_sparse', 'to_numpy', 'batch_to_device', 'batch_to_cuda',
+           'batch_set_tensor', 'ReadWriteLock']
+
+
+class ReadWriteLock:
+    """
+    A lock object that allows many simultaneous `read locks`, but
+    only one `write lock.`
+    From https://www.oreilly.com/library/view/python-cookbook/0596001673/ch06s04.html.
+    """
+
+    def __init__(self):
+        self._read_ready = threading.Condition(threading.Lock())
+        self._readers = 0
+
+    def acquire_read(self):
+        """
+        Acquire a read lock. Blocks only if a thread has
+        acquired the write lock.
+        """
+
+        self._read_ready.acquire()
+        try:
+            self._readers += 1
+        finally:
+            self._read_ready.release()
+
+    def release_read(self):
+        """
+        Release a read lock.
+        """
+
+        self._read_ready.acquire()
+        try:
+            self._readers -= 1
+            if not self._readers:
+                self._read_ready.notifyAll()
+        finally:
+            self._read_ready.release()
+
+    def acquire_write(self):
+        """
+        Acquire a write lock. Blocks until there are no
+        acquired read or write locks.
+        """
+
+        self._read_ready.acquire()
+        while self._readers > 0:
+            self._read_ready.wait()
+
+    def release_write(self):
+        """
+        Release a write lock.
+        """
+
+        self._read_ready.release()
 
 
 class ThreadsafeIter:
@@ -50,6 +105,7 @@ def threadsafe_generator(generator):
 
     def safe_generator(*agrs, **kwargs):
         return ThreadsafeIter(generator(*agrs, **kwargs))
+
     return safe_generator
 
 
@@ -365,13 +421,29 @@ def batch_set_value(params, values):
     :param params:
         a :class:`torch.Tensor`.
     :param values:
+        a :class:`numpy.ndarray` of the same shape as `params`.
+    :return:
+        ``None``.
+    """
+
+    for p, v in zip(params, values):
+        p.data.copy_(T.from_numpy(v).data)
+
+
+def batch_set_tensor(params, values):
+    """
+    Sets values of a tensor to another.
+
+    :param params:
+        a :class:`torch.Tensor`.
+    :param values:
         a :class:`torch.Tensor` of the same shape as `params`.
     :return:
         ``None``.
     """
 
     for p, v in zip(params, values):
-        p.data.copy_(T.from_numpy(v))
+        p.data.copy_(v.data)
 
 
 def to_numpy(x: T.Tensor):
