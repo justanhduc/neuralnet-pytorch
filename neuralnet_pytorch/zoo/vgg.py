@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torchvision.models.vgg import model_urls
 from torchvision.models.utils import load_state_dict_from_url
-from ..layers import *
+from ..layers import Sequential, Conv2d, ConvNormAct, FC, MaxPool2d, wrapper
 from ..utils import batch_set_tensor
 
 __all__ = [

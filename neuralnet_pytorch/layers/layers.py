@@ -597,7 +597,7 @@ class Conv2d(nn.Conv2d, _LayerMethod):
             padding = (self.ks[1] // 2, self.ks[1] // 2, self.ks[0] // 2, self.ks[0] // 2)
             pad = nn.ReflectionPad2d(padding) if self.border_mode == 'ref' else nn.ReplicationPad2d(padding)
         else:
-            pad = lambda x: x
+            pad = lambda x: x  # noqa: E731
 
         input = pad(input)
         input = self.activation(super().forward(input))
@@ -713,10 +713,10 @@ class ConvTranspose2d(nn.ConvTranspose2d, _LayerMethod):
 
         shape = [np.nan if s is None else s for s in self.input_shape]
         _, _, h_in, w_in = shape
-        h_out = (h_in - 1) * self.stride[0] - 2 * self.padding[0] + self.dilation[0] * (self.kernel_size[0] - 1) + \
-                self.output_padding[0] + 1
-        w_out = (w_in - 1) * self.stride[1] - 2 * self.padding[1] + self.dilation[1] * (self.kernel_size[1] - 1) + \
-                self.output_padding[1] + 1
+        h_out = (h_in - 1) * self.stride[0] - 2 * self.padding[0] + self.dilation[0] * \
+                (self.kernel_size[0] - 1) + self.output_padding[0] + 1
+        w_out = (w_in - 1) * self.stride[1] - 2 * self.padding[1] + self.dilation[1] * \
+                (self.kernel_size[1] - 1) + self.output_padding[1] + 1
         return self.input_shape[0], self.out_channels, h_out, w_out
 
     def reset_parameters(self):
@@ -831,8 +831,8 @@ class Softmax(FC):
     def __init__(self, input_shape, out_features, dim=1, weights_init=None, bias_init=None, **kwargs):
         self.dim = dim
         kwargs['dim'] = dim
-        super().__init__(input_shape, out_features, activation='softmax', weights_init=weights_init, bias_init=bias_init,
-                         **kwargs)
+        super().__init__(input_shape, out_features, activation='softmax', weights_init=weights_init,
+                         bias_init=bias_init, **kwargs)
 
 
 @utils.add_simple_repr
@@ -921,15 +921,16 @@ class ConvNormAct(Sequential):
     no_scale: bool
         whether to use a trainable scale parameter. Default: ``True``.
     norm_layer
-        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+        normalization method to be used.
+        Choices are ``'bn'``, ``'in'``, ``'ln'`` or a callable.
         Default: ``'bn'``.
     kwargs
         extra keyword arguments to pass to activation.
     """
 
-    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1, bias=True,
-                 activation='relu', weights_init=None, bias_init=None, eps=1e-5, momentum=0.1, affine=True,
-                 track_running_stats=True, no_scale=False, norm_layer='bn', **kwargs):
+    def __init__(self, input_shape, out_channels, kernel_size, stride=1, padding='half', dilation=1, groups=1,
+                 bias=True, activation='relu', weights_init=None, bias_init=None, eps=1e-5, momentum=0.1,
+                 affine=True, track_running_stats=True, no_scale=False, norm_layer='bn', **kwargs):
         super().__init__(input_shape=input_shape)
         from .normalization import BatchNorm2d, InstanceNorm2d, LayerNorm
 
@@ -1109,8 +1110,9 @@ class ResNetBasicBlock(Module):
 
     expansion = 1
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
-                 base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1,
+                 activation='relu', base_width=64, downsample=None, groups=1, block=None, weights_init=None,
+                 norm_layer='bn', **kwargs):
         input_shape = _image_shape(input_shape)
         super().__init__(input_shape=input_shape)
         self.out_channels = out_channels
@@ -1235,11 +1237,12 @@ class ResNetBottleneckBlock(ResNetBasicBlock):
 
     expansion = 4
 
-    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1, activation='relu',
-                 base_width=64, downsample=None, groups=1, block=None, weights_init=None, norm_layer='bn', **kwargs):
-        super().__init__(input_shape, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation,
-                         activation=activation, base_width=base_width, downsample=downsample, groups=groups, block=block,
-                         weights_init=weights_init, norm_layer=norm_layer, **kwargs)
+    def __init__(self, input_shape, out_channels, kernel_size=3, stride=1, padding='half', dilation=1,
+                 activation='relu', base_width=64, downsample=None, groups=1, block=None, weights_init=None,
+                 norm_layer='bn', **kwargs):
+        super().__init__(input_shape, out_channels, kernel_size, stride=stride, padding=padding,
+                         dilation=dilation, activation=activation, base_width=base_width, downsample=downsample,
+                         groups=groups, block=block, weights_init=weights_init, norm_layer=norm_layer, **kwargs)
 
 
 @utils.add_custom_repr
@@ -1288,8 +1291,9 @@ class StackingConv(Sequential):
         extra keyword arguments to pass to activation.
     """
 
-    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half', dilation=1,
-                 bias=True, activation='relu', weights_init=None, bias_init=None, norm_method=None, groups=1, **kwargs):
+    def __init__(self, input_shape, out_channels, kernel_size, num_layers, stride=1, padding='half',
+                 dilation=1, bias=True, activation='relu', weights_init=None, bias_init=None,
+                 norm_method=None, groups=1, **kwargs):
         assert num_layers > 1, 'num_layers must be greater than 1, got %d' % num_layers
         input_shape = _image_shape(input_shape)
 

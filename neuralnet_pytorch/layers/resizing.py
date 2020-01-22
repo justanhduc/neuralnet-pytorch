@@ -112,7 +112,8 @@ class AvgPool2d(nn.AvgPool2d, _Pool2d):
             shape of the input image. Optional.
     """
 
-    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False, input_shape=None):
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=False,
+                 input_shape=None):
         input_shape = _image_shape(input_shape)
         self.input_shape = input_shape
         kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
@@ -412,7 +413,8 @@ class DimShuffle(Module):
     broadcasted dimensions.
     Inspired by `Theano's dimshuffle`_.
 
-    .. _Theano's dimshuffle: https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356
+    .. _Theano's dimshuffle:
+    https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356
 
     Parameters
     ----------
