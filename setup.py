@@ -1,11 +1,10 @@
+import sys
 from setuptools import setup, find_packages
 import os
 import versioneer
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 version_data = versioneer.get_versions()
 CMD_CLASS = versioneer.get_cmdclass()
-CMD_CLASS.update({'build_ext': BuildExtension})
 
 if version_data['error'] is not None:
     # Get the fallback version
@@ -22,11 +21,22 @@ if version_data['error'] is not None:
 
 
 def get_extensions():
-    import glob
-    ext_root = 'neuralnet_pytorch/extensions'
-    ext_src = glob.glob(os.path.join(ext_root, 'csrc/*.cpp')) + glob.glob(os.path.join(ext_root, 'csrc/*.cu'))
-    ext_include = os.path.join(ext_root, 'include')
-    return ext_src, ext_include
+    if '--cuda-ext' in sys.argv:
+        import glob
+        from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+        CMD_CLASS.update({'build_ext': BuildExtension})
+        ext_root = 'neuralnet_pytorch/extensions'
+        ext_src = glob.glob(os.path.join(ext_root, 'csrc/*.cpp')) + glob.glob(os.path.join(ext_root, 'csrc/*.cu'))
+        ext_include = os.path.join(ext_root, 'include')
+        sys.argv.remove("--cuda-ext")
+        return [
+            CUDAExtension(
+            name='neuralnet_pytorch.ext',
+            sources=ext_src,
+            include_dirs=[ext_include]
+        )]
+    else:
+        return []
 
 
 def setup_package():
@@ -34,7 +44,7 @@ def setup_package():
     with open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
 
-    ext_src, ext_include = get_extensions()
+    cuda_ext = get_extensions()
     setup(
         name='neuralnet-pytorch',
         version=version_data['version'],
@@ -57,13 +67,7 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs', 'tests', 'examples']),
-        ext_modules=[
-            CUDAExtension(
-                name='neuralnet_pytorch.ext',
-                sources=ext_src,
-                include_dirs=[ext_include]
-            )
-        ],
+        ext_modules=cuda_ext,
         cmdclass=CMD_CLASS,
         install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],
         extras_require={

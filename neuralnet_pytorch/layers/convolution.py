@@ -3,7 +3,7 @@ import torch as T
 import torch.nn as nn
 from torch.nn.modules.utils import _pair
 
-from .abstract import _LayerMethod, Module, Sequential
+from .abstract import _LayerMethod, Sequential
 from .. import utils
 from ..utils import _image_shape, _matrix_shape
 

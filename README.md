@@ -96,7 +96,7 @@ in which `option` can be `gin`/`geom`/`visdom`/`slack`.
 To install the version with some collected Cuda/C++ ops, use
 
 ```
-pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@fancy
+pip install neuralnet-pytorch --global-option="--cuda-ext"
 ```
 
 # Usages

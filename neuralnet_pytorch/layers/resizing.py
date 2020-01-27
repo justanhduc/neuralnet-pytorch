@@ -413,8 +413,7 @@ class DimShuffle(Module):
     broadcasted dimensions.
     Inspired by `Theano's dimshuffle`_.
 
-    .. _Theano's dimshuffle:
-    https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356
+    .. _Theano's dimshuffle: https://github.com/Theano/Theano/blob/d395439aec5a6ddde8ef5c266fd976412a5c5695/theano/tensor/var.py#L323-L356  # noqa
 
     Parameters
     ----------

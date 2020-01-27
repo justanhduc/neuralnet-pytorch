@@ -138,47 +138,61 @@ def test_reshape(device):
 
 @pytest.mark.parametrize('device', dev)
 def test_batch_pairwise_distance(device):
-    xyz1 = T.rand(10, 4000, 3).to(device).requires_grad_(True)
-    xyz2 = T.rand(10, 5000, 3).to(device)
-    expected = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=False)
-    actual = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=True)
-    testing.assert_allclose(actual, expected)
+    xyz = T.rand(1, 4, 3).to(device)
+    actual = nnt.utils.batch_pairwise_dist(xyz, xyz, c_code=False)
+    testing.assert_allclose(T.diag(actual[0]), T.zeros(actual.shape[1]).to(device))
 
-    expected_cost = T.sum(expected)
-    expected_cost.backward()
-    expected_grad = xyz1.grad
-    xyz1.grad.zero_()
+    try:
+        import neuralnet_pytorch.ext as ext
 
-    actual_cost = T.sum(actual)
-    actual_cost.backward()
-    actual_grad = xyz1.grad
-    testing.assert_allclose(actual_grad, expected_grad)
+        xyz1 = T.rand(10, 4000, 3).to(device).requires_grad_(True)
+        xyz2 = T.rand(10, 5000, 3).to(device)
+        expected = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=False)
+        actual = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=True)
+        testing.assert_allclose(actual, expected)
 
-    for _ in range(10):
-        t1 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=False)
-        t2 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=True)
-        print('pt: %f, cpp: %f' % (t1, t2))
+        expected_cost = T.sum(expected)
+        expected_cost.backward()
+        expected_grad = xyz1.grad
+        xyz1.grad.zero_()
+
+        actual_cost = T.sum(actual)
+        actual_cost.backward()
+        actual_grad = xyz1.grad
+        testing.assert_allclose(actual_grad, expected_grad)
+
+        for _ in range(10):
+            t1 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=False)
+            t2 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=True)
+            print('pt: %f, cpp: %f' % (t1, t2))
+    except ModuleNotFoundError:
+        pass
 
 
 @pytest.mark.parametrize('device', dev)
 def test_pointcloud_to_voxel(device):
-    xyz = T.rand(10, 4000, 3).to(device).requires_grad_(True)
-    pc = xyz * 2. - 1.
-    expected = nnt.utils.pc2vox_fast(pc, c_code=False)
-    actual = nnt.utils.pc2vox_fast(pc, c_code=True)
-    testing.assert_allclose(actual, expected)
+    try:
+        import neuralnet_pytorch.ext as ext
 
-    expected_cost = T.sum(expected)
-    expected_cost.backward(retain_graph=True)
-    expected_grad = xyz.grad
-    xyz.grad.zero_()
+        xyz = T.rand(10, 4000, 3).to(device).requires_grad_(True)
+        pc = xyz * 2. - 1.
+        expected = nnt.utils.pc2vox_fast(pc, c_code=False)
+        actual = nnt.utils.pc2vox_fast(pc, c_code=True)
+        testing.assert_allclose(actual, expected)
 
-    actual_cost = T.sum(actual)
-    actual_cost.backward()
-    actual_grad = xyz.grad
-    testing.assert_allclose(actual_grad, expected_grad)
+        expected_cost = T.sum(expected)
+        expected_cost.backward(retain_graph=True)
+        expected_grad = xyz.grad
+        xyz.grad.zero_()
 
-    for _ in range(10):
-        t1 = nnt.utils.time_cuda_module(nnt.utils.pc2vox_fast, pc, c_code=False)
-        t2 = nnt.utils.time_cuda_module(nnt.utils.pc2vox_fast, pc)
-        print('pt: %f, cpp: %f' % (t1, t2))
+        actual_cost = T.sum(actual)
+        actual_cost.backward()
+        actual_grad = xyz.grad
+        testing.assert_allclose(actual_grad, expected_grad)
+
+        for _ in range(10):
+            t1 = nnt.utils.time_cuda_module(nnt.utils.pc2vox_fast, pc, c_code=False)
+            t2 = nnt.utils.time_cuda_module(nnt.utils.pc2vox_fast, pc)
+            print('pt: %f, cpp: %f' % (t1, t2))
+    except ModuleNotFoundError:
+        pass
