@@ -50,7 +50,7 @@ def setup_package():
         install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],
         extras_require={
             'gin': ['gin-config'],
-            'emd': ['pykeops', 'geomloss'],
+            'geom': ['pykeops', 'geomloss'],
             'visdom': ['visdom'],
             'slack': ['slackclient']
         },
