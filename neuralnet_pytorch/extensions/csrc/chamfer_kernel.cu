@@ -139,6 +139,7 @@ NmDistanceKernel(int b, int n, const scalar_t* __restrict__ xyz, int m,
 std::vector<torch::Tensor>
 chamfer_cuda_forward(at::Tensor xyz1, at::Tensor xyz2)
 {
+  cudaSetDevice((int)xyz1.device().index());
   const auto batch_size = xyz1.size(0);
   const auto n = xyz1.size(1); // num_points point cloud A
   const auto m = xyz2.size(1); // num_points point cloud B
