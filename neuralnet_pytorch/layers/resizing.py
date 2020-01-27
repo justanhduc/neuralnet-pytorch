@@ -6,7 +6,7 @@ from torch.nn.modules.utils import _ntuple
 
 from .. import utils
 from ..utils import _image_shape
-from .layers import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
+from .abstract import _LayerMethod, Module, MultiSingleInputModule, MultiMultiInputModule
 
 __all__ = ['Interpolate', 'AvgPool2d', 'MaxPool2d', 'Cat', 'Reshape', 'Flatten', 'DimShuffle', 'GlobalAvgPool2D',
            'ConcurrentCat', 'SequentialCat']

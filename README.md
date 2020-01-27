@@ -91,7 +91,7 @@ To install the package with optional dependencies, try
 ```
 pip install "neuralnet-pytorch[option] @ git+git://github.com/justanhduc/neuralnet-pytorch.git@master"
 ```
-in which `option` can be `gin` and/or `emd`.
+in which `option` can be `gin`/`geom`/`visdom`/`slack`.
 
 To install the version with some collected Cuda/C++ ops, use
 
