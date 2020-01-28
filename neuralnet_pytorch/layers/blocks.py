@@ -248,16 +248,17 @@ class FCNormAct(Sequential):
         statistics in both training and eval modes. Default: ``True``.
     no_scale: bool
         whether to use a trainable scale parameter. Default: ``True``.
-    norm_method
-        normalization method to be used. Choices are ``'bn'``, ``'in'``, and ``'ln'``.
+    norm_layer
+        normalization method to be used.
+        Choices are ``'bn'``, ``'in'``, and ``'ln'``, or a callable function.
         Default: ``'bn'``.
     kwargs
-        extra keyword arguments to pass to activation.
+        extra keyword arguments to pass to activation and norm_layer.
     """
 
     def __init__(self, input_shape, out_features, bias=True, activation=None, weights_init=None, bias_init=None,
                  flatten=False, keepdim=True, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
-                 no_scale=False, norm_method='bn', **kwargs):
+                 no_scale=False, norm_layer='bn', **kwargs):
         super().__init__(input_shape=input_shape)
         self.out_features = out_features
         self.flatten = flatten
@@ -267,10 +268,14 @@ class FCNormAct(Sequential):
         self.fc = FC(self.input_shape, out_features, bias, weights_init=weights_init, bias_init=bias_init,
                      flatten=flatten, keepdim=keepdim)
 
-        norm_method = BatchNorm1d if norm_method == 'bn' else InstanceNorm1d if norm_method == 'in' \
-            else LayerNorm if norm_method == 'ln' else FeatureNorm1d if norm_method == 'fn' else norm_method
-        self.norm = norm_method(self.fc.output_shape, eps, momentum, affine, track_running_stats,
-                                no_scale=no_scale, activation=self.activation, **kwargs)
+        if isinstance(norm_layer, str):
+            norm_layer = BatchNorm1d if norm_layer == 'bn' else InstanceNorm1d if norm_layer == 'in' \
+                else LayerNorm if norm_layer == 'ln' else FeatureNorm1d if norm_layer == 'fn' else norm_layer
+        else:
+            assert callable(norm_layer), 'norm_layer must be an instance of `str` or callable'
+
+        self.norm = norm_layer(self.fc.output_shape, eps, momentum, affine, track_running_stats,
+                               no_scale=no_scale, activation=self.activation, **kwargs)
 
     def extra_repr(self):
         s = '{in_features}, {out_features}'

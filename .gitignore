@@ -1,1 +1,6 @@
 # Created by .ignore support plugin (hsz.mobi)
+build
+dist
+examples/data
+examples/results
+neuralnet_pytorch.egg-info

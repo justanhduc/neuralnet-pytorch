@@ -138,17 +138,19 @@ def test_slicing_sequential(idx):
     assert b.input_shape == a[start].input_shape
 
 
+@pytest.mark.parametrize('device', dev)
 @pytest.mark.parametrize('bs', (pytest.param(None, marks=pytest.mark.xfail), 1, 2, 3, 4, 5))
 @pytest.mark.parametrize('shuffle', (True, False))
 @pytest.mark.parametrize('drop_last', (True, False))
 @pytest.mark.parametrize('pin_memory', (True, False))
-def test_dataloader(bs, shuffle, drop_last, pin_memory):
+def test_dataloader(device, bs, shuffle, drop_last, pin_memory):
     from torch.utils.data import TensorDataset
     data, label = T.arange(10), T.arange(10) + 10
     dataset = TensorDataset(data, label)
     loader = nnt.DataLoader(dataset, batch_size=bs, shuffle=shuffle, drop_last=drop_last, pin_memory=pin_memory,
                             num_workers=10)
-    loader = nnt.DataPrefetcher(loader)
+    if 'cuda' in device:
+        loader = nnt.DataPrefetcher(loader)
 
     for epoch in range(2):
         data_, label_ = [], []

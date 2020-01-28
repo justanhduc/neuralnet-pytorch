@@ -2,3 +2,4 @@ include *.md
 include LICENSE.txt
 include versioneer.py
 graft neuralnet_pytorch/extensions/include
+include neuralnet_pytorch/_version.py
