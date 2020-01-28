@@ -1,5 +1,6 @@
 import torch as T
 
+from .. import cuda_ext_available
 from . import tensor_utils as tutils
 
 __all__ = ['rgb2gray', 'rgb2ycbcr', 'rgba2rgb', 'ycbcr2rgb', 'pc2vox', 'pc2vox_fast']
@@ -141,7 +142,7 @@ def pc2vox(pc: T.Tensor, vox_size=32, sigma=.005, analytical_gauss_norm=True):
     return voxels
 
 
-def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, c_code=False):
+def pc2vox_fast(pc: T.Tensor, voxel_size=32, grid_size=1., filter_outlier=True, c_code=cuda_ext_available):
     """
     A fast conversion from a centered point cloud to voxel representation.
 

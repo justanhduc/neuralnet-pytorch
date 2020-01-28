@@ -1,3 +1,5 @@
+from .. import cuda_ext_available
+
 import torch as T
 import numpy as np
 import numbers
@@ -447,7 +449,7 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
     return dimshuffle(output, (0, 3, 1, 2))
 
 
-def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=False):
+def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
     """
     Calculates the pair-wise distance between two sets of points.
 

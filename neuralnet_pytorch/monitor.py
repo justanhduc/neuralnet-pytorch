@@ -740,7 +740,6 @@ class Monitor:
 
                             for itt, batch in enumerate(eval_loader):
                                 batch = utils.batch_to_device(batch, device=device)
-
                                 try:
                                     net.eval_procedure(*batch, *args, **kwargs)
                                 except NotImplementedError:
@@ -1036,7 +1035,6 @@ class Monitor:
                         img = val[num]
                         if img.shape[0] in (1, 3):
                             img = np.transpose(img, (1, 2, 0))
-
                             if latest_only:
                                 imwrite(os.path.join(self.image_folder,
                                                      name.replace(' ', '_') + '_%d.jpg' % num), img)
@@ -1050,7 +1048,6 @@ class Monitor:
                                 # in case all image values are the same
                                 img_normed[np.isnan(img_normed)] = 0
                                 img_normed[np.isinf(img_normed)] = 0
-
                                 if latest_only:
                                     imwrite(os.path.join(
                                         self.image_folder,

@@ -138,7 +138,11 @@ def test_reshape(device):
 
 @pytest.mark.parametrize('device', dev)
 def test_batch_pairwise_distance(device):
-    if device == 'gpu':
+    xyz = T.rand(1, 4, 3).to(device)
+    actual = nnt.utils.batch_pairwise_dist(xyz, xyz, c_code=False)
+    testing.assert_allclose(T.diag(actual[0]), T.zeros(actual.shape[1]).to(device))
+
+    if nnt.cuda_ext_available:
         xyz1 = T.rand(10, 4000, 3).to(device).requires_grad_(True)
         xyz2 = T.rand(10, 5000, 3).to(device)
         expected = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=False)
@@ -163,7 +167,7 @@ def test_batch_pairwise_distance(device):
 
 @pytest.mark.parametrize('device', dev)
 def test_pointcloud_to_voxel(device):
-    if device == 'gpu':
+    if nnt.cuda_ext_available:
         xyz = T.rand(10, 4000, 3).to(device).requires_grad_(True)
         pc = xyz * 2. - 1.
         expected = nnt.utils.pc2vox_fast(pc, c_code=False)

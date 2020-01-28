@@ -1,3 +1,4 @@
+import sys
 from setuptools import setup, find_packages
 import os
 import versioneer
@@ -19,11 +20,31 @@ if version_data['error'] is not None:
     version_data['version'] = FALLBACK_VERSION
 
 
+def get_extensions():
+    if '--cuda-ext' in sys.argv:
+        import glob
+        from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+        CMD_CLASS.update({'build_ext': BuildExtension})
+        ext_root = 'neuralnet_pytorch/extensions'
+        ext_src = glob.glob(os.path.join(ext_root, 'csrc/*.cpp')) + glob.glob(os.path.join(ext_root, 'csrc/*.cu'))
+        ext_include = os.path.join(ext_root, 'include')
+        sys.argv.remove("--cuda-ext")
+        return [
+            CUDAExtension(
+            name='neuralnet_pytorch.ext',
+            sources=ext_src,
+            include_dirs=[ext_include]
+        )]
+    else:
+        return []
+
+
 def setup_package():
     here = os.path.abspath(os.path.dirname(__file__))
     with open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
         long_description = f.read()
 
+    cuda_ext = get_extensions()
     setup(
         name='neuralnet-pytorch',
         version=version_data['version'],
@@ -46,6 +67,7 @@ def setup_package():
         ],
         platforms=['Windows', 'Linux'],
         packages=find_packages(exclude=['docs', 'tests', 'examples']),
+        ext_modules=cuda_ext,
         cmdclass=CMD_CLASS,
         install_requires=['matplotlib', 'scipy', 'numpy', 'tb-nightly', 'imageio', 'future', 'tensorboardX'],
         extras_require={

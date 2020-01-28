@@ -42,6 +42,13 @@ from .monitor import *
 from . import optim
 from . import zoo
 
+try:
+    import neuralnet_pytorch.ext as ext
+    cuda_ext_available = True
+    del ext
+except ModuleNotFoundError:
+    cuda_ext_available = False
+
 from .version import author as __author__
 from ._version import get_versions
 

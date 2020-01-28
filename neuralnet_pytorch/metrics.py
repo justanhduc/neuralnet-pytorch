@@ -80,7 +80,7 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return reduce(T.abs(x - y) ** p)
 
 
-def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=False):
+def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=True):
     """
     Calculates the Chamfer distance between two batches of point clouds.
     The Pytorch code is adapted from DenseLidarNet_.
@@ -116,7 +116,7 @@ def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=False):
         from .extensions import chamfer_distance
         dist1, dist2 = chamfer_distance(xyz1, xyz2)
     else:
-        P = utils.batch_pairwise_dist(xyz1, xyz2)
+        P = utils.batch_pairwise_dist(xyz1, xyz2, c_code=c_code)
         dist2, _ = T.min(P, 1)
         dist1, _ = T.min(P, 2)
     loss_2 = reduce(dist2)
@@ -124,7 +124,7 @@ def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=False):
     return loss_1 + loss_2
 
 
-def emd_loss(xyz1, xyz2, reduce='mean', sinkhorn=True):
+def emd_loss(xyz1, xyz2, reduce='mean', sinkhorn=False):
     """
     Calculates the Earth Mover Distance (or Wasserstein metric) between two sets
     of points.
