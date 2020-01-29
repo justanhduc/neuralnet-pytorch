@@ -34,6 +34,13 @@ import sys as _sys
 for symbol in ['_ensure_pt_install', '_sys']:
     delattr(_sys.modules[__name__], symbol)
 
+try:
+    import neuralnet_pytorch.ext as ext
+    cuda_ext_available = True
+    del ext
+except ModuleNotFoundError:
+    cuda_ext_available = False
+
 from . import utils
 from .utils import DataLoader, DataPrefetcher, cuda_available, function
 from .layers import *
@@ -41,13 +48,6 @@ from .metrics import *
 from .monitor import *
 from . import optim
 from . import zoo
-
-try:
-    import neuralnet_pytorch.ext as ext
-    cuda_ext_available = True
-    del ext
-except ModuleNotFoundError:
-    cuda_ext_available = False
 
 from .version import author as __author__
 from ._version import get_versions

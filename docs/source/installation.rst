@@ -49,13 +49,13 @@ To install the package with optional dependencies, try ::
 
     pip install "neuralnet-pytorch[option] @ git+git://github.com/justanhduc/neuralnet-pytorch.git@master"
 
-in which ``option`` can be ``gin`` and/or ``emd``.
+in which ``option`` can be ``gin``/``geom``/``visdom``/``slack``.
 
 
 We also provide a version with some fancy Cuda/C++ implementations
-collected on various sources. To install this version, run ::
+that are implemented or collected from various sources. To install this version, run ::
 
-    pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@fancy
+    pip install neuralnet-pytorch --cuda-ext
 
 Uninstall Neuralnet-pytorch
 ---------------------------

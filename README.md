@@ -107,7 +107,8 @@ The manual reference is still under development and is available at https://neur
 
 - [x] Adding introduction and installation 
 - [x] Writing documentations
-- [ ] Adding examples
+- [x] Adding examples
+- [ ] Adding benchmarks for examples
 
 # Disclaimer
 

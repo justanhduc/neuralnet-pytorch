@@ -281,7 +281,10 @@ class FC(nn.Linear, _LayerMethod):
     @utils.validate
     def output_shape(self):
         if self.flatten:
-            return self.input_shape[0], self.out_features
+            if self.keepdim:
+                return self.input_shape[0], self.out_features, 1
+            else:
+                return self.input_shape[0], self.out_features
         else:
             return self.input_shape[:-1] + (self.out_features,)
 
