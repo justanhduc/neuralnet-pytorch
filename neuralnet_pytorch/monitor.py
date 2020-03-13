@@ -1,4 +1,5 @@
 from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib
 import matplotlib.pyplot as plt
 import threading
@@ -248,6 +249,8 @@ class Monitor:
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._mat_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._mat_since_last_flush = {}
         self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._points_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
@@ -349,6 +352,11 @@ class Monitor:
                 self.num_stats = log['num']
             except KeyError:
                 root_logger.warning('No record found for `num`', exc_info=True)
+
+            try:
+                self.num_stats = log['mat']
+            except KeyError:
+                root_logger.warning('No record found for `mat`', exc_info=True)
 
             try:
                 self.hist_stats = log['hist']
@@ -549,6 +557,36 @@ class Monitor:
         """
 
         self._num_since_beginning[key].clear()
+
+    @property
+    def mat_stats(self):
+        """
+        returns the collected scalar statistics from beginning.
+
+        :return:
+            :attr:`~_num_since_beginning`.
+        """
+
+        return dict(self._mat_since_beginning)
+
+    @mat_stats.setter
+    def mat_stats(self, stats_dict):
+        self._mat_since_beginning.update(stats_dict)
+
+    @mat_stats.deleter
+    def mat_stats(self):
+        self._mat_since_beginning.clear()
+
+    def clear_mat_stats(self, key):
+        """
+        removes the collected statistics for matrix plot of the specified `key`.
+
+        :param key:
+            the name of the matrix collection.
+        :return: ``None``.
+        """
+
+        self._mat_since_beginning[key].clear()
 
     @property
     def hist_stats(self):
@@ -868,6 +906,28 @@ class Monitor:
             prefix = kwargs.pop('prefix', 'scalar/')
             self.writer.add_scalar(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
+    def plot_matrix(self, name: str, value, labels=None, show_values=False):
+        """
+        plots the given matrix with colorbar and labels if provided.
+        :param name:
+            name of the figure to be saved. Must be unique among plots.
+        :param value:
+            matrix value to be plotted.
+        :param labels:
+            labels of each axis.
+            Can be a list/tuple of strings or a nested list/tuple.
+            Defaults: None.
+        :return: ``None``.
+        """
+
+        self._options[name]['labels'] = labels
+        self._options[name]['show_values'] = show_values
+        if isinstance(value, T.Tensor):
+            value = utils.to_numpy(value)
+
+        self._mat_since_last_flush[name] = value
+        self._mat_since_beginning[name][self.iter] = value
+
     def scatter(self, name: str, value, latest_only=False, **kwargs):
         """
         schedules a scattor plot of (a batch of) points.
@@ -903,7 +963,7 @@ class Monitor:
 
         - If the input is ``'uint8'`` it is an 8-bit image.
         - If the input is ``'float32'``, its values lie between ``0`` and ``1``.
-        - If the input has 3 dims, the shape is ``[h, w, 3]``.
+        - If the input has 3 dims, the shape is ``[h, w, 3]`` or ``[h, w, 1]``.
         - If the channel dim is different from 3 or 1, it will be considered as multiple gray images.
 
         :param name:
@@ -935,9 +995,9 @@ class Monitor:
 
         self._img_since_last_flush[name][self.iter] = value
         if self.writer is not None:
-            for idx, img in enumerate(value):
-                prefix = kwargs.pop('prefix', 'image/')
-                self.writer.add_image(prefix + name.replace(' ', '-') + '-%d' % idx, img, global_step=self.iter)
+            prefix = kwargs.pop('prefix', 'image/')
+            self.writer.add_images(prefix + name.replace(' ', '-'), value,
+                                   global_step=self.iter, dataformats='NCHW')
 
     def hist(self, name, value, n_bins=20, latest_only=False, **kwargs):
         """
@@ -1020,6 +1080,45 @@ class Monitor:
             if self.vis is not None:
                 self.vis.matplot(fig, win=name)
 
+            fig.clear()
+
+    def _plot_matrix(self, mats, fig):
+        for name, val in list(mats.items()):
+            ax = fig.add_subplot(111)
+            im = ax.imshow(val)
+            fig.colorbar(im)
+
+            labels = self._options[name].get('labels')
+            ax.set_xticks(np.arange(len(val)))
+            ax.set_yticks(np.arange(len(val)))
+            if labels is not None:
+                if isinstance(labels[0], (list, tuple)):
+                    ax.set_xticklabels(labels[0])
+                    ax.set_yticklabels(labels[1])
+                else:
+                    ax.set_xticklabels(labels)
+                    ax.set_yticklabels(labels)
+
+                # Rotate the tick labels and set their alignment.
+                plt.setp(ax.get_xticklabels(), rotation=45, ha='right', rotation_mode='anchor')
+
+            ax.set_ylim([-.5, len(val) - .5])
+
+            show_values = self._options[name].get('show_values')
+            if show_values:
+                 # Loop over data dimensions and create text annotations.
+                for (i, j), z in np.ndenumerate(val):
+                    ax.text(j, i, z, ha='center', va='center', color='w')
+
+            ax.set_title(name)
+            fig.savefig(os.path.join(self.plot_folder, name + '-matrix.jpg'), transparent=None)
+
+            canvas = FigureCanvas(fig)
+            canvas.draw()
+            width, height = fig.get_size_inches() * fig.get_dpi()
+            img = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+            self.writer.add_image('matrix-' + name.replace(' ', '-'), img,
+                                  global_step=self.iter, dataformats='HWC')
             fig.clear()
 
     def _imwrite(self, imgs):
@@ -1106,11 +1205,14 @@ class Monitor:
         fig = plt.figure()
         while True:
             items = self._q.get()
-            it, epoch, nums, imgs, hists, points = items
+            it, epoch, nums, mats, imgs, hists, points = items
             prints = []
 
             # plot statistics
             self._plot(nums, fig, prints)
+
+            # plot confusion matrix
+            self._plot_matrix(mats, fig)
 
             # save recorded images
             self._imwrite(imgs)
@@ -1127,6 +1229,7 @@ class Monitor:
                              'epoch': epoch,
                              'num_iters': self.num_iters,
                              'num': dict(self._num_since_beginning),
+                             'mat': dict(self._mat_since_beginning),
                              'hist': dict(self._hist_since_beginning)}
 
                 pkl.dump(dump_dict, f, pkl.HIGHEST_PROTOCOL)
@@ -1160,10 +1263,11 @@ class Monitor:
         :return: ``None``.
         """
 
-        self._q.put((self.iter, self.epoch, dict(self._num_since_last_flush),
+        self._q.put((self.iter, self.epoch, dict(self._num_since_last_flush), dict(self._mat_since_last_flush),
                      dict(self._img_since_last_flush), dict(self._hist_since_last_flush),
                      dict(self._points_since_last_flush)))
         self._num_since_last_flush.clear()
+        self._mat_since_last_flush.clear()
         self._img_since_last_flush.clear()
         self._hist_since_last_flush.clear()
         self._points_since_last_flush.clear()
@@ -1348,6 +1452,7 @@ class Monitor:
         del self.hist_stats
         del self.options
         self._num_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
+        self._mat_since_last_flush = {}
         self._img_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._hist_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._points_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)

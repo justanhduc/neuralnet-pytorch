@@ -71,6 +71,7 @@ def test_monitor(device):
             mon.plot('parabol1', (it + epoch) ** 2)
             mon.hist('histogram1', a + (it * epoch))
             mon.imwrite('image', a[None, None])
+            mon.plot_matrix('random', a)
 
     loaded = mon.load('foo.pkl', version=48)
     testing.assert_allclose(a + 8., loaded)

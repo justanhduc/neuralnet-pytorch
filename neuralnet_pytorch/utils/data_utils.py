@@ -547,7 +547,7 @@ def batch_to_device(batch, device=0, non_blocking=False):
     """
 
     assert isinstance(device, (int, str, T.device)), 'Unknown type of device'
-    if isinstance(batch, T.Tensor):
+    if isinstance(batch, T.Tensor) or hasattr(batch, 'to'):
         batch_device = batch.to(device=device, non_blocking=non_blocking)
     else:
         try:
