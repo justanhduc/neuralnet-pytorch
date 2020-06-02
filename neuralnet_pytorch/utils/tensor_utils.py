@@ -6,7 +6,7 @@ import numbers
 
 __all__ = ['dimshuffle', 'shape_padleft', 'shape_padright', 'swapaxes', 'ravel_index', 'tile', 'repeat', 'block_diag',
            'block_diag_sparse', 'get_bilinear_weights', 'interpolate_bilinear', 'batch_pairwise_dist', 'gram_matrix',
-           'var', 'std']
+           'var', 'std', 'break_dim']
 
 
 def dimshuffle(x: T.Tensor, pattern):
@@ -563,3 +563,25 @@ def std(x: T.Tensor, dim=None, unbiased=True, keepdim=False):
     """
 
     return T.sqrt(var(x, dim, unbiased, keepdim) + 1e-8)
+
+
+def break_dim(x: T.Tensor, dim: int, sizes=(-1,)):
+    """
+    Break input tensor at `dim` into sizes.
+
+    :param x:
+        an input tensor.
+    :param dim:
+        position at which the tensor is broken.
+    :param sizes:
+        sizes that the broken tensor is reshaped into.
+    :return:
+        a tensor with shape at `dim` is `sizes`.
+    """
+    
+    if dim < 0:
+        dim += x.ndim
+
+    shape = tuple(x.shape)
+    new_shape = shape[:dim] + tuple(sizes) + shape[dim+1:]
+    return x.view(*new_shape)
