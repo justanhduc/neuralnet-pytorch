@@ -15,7 +15,7 @@ import atexit
 import logging
 from matplotlib import cm
 from imageio import imwrite
-from shutil import copyfile
+from shutil import copyfile, copytree, ignore_patterns
 
 try:
     import visdom
@@ -850,25 +850,32 @@ class Monitor:
         if use_tensorboard:
             self.writer.add_graph(network, *args, **kwargs)
 
-    def backup(self, files):
+    def backup(self, files_or_folders, ignore=()):
         """
         saves a copy of the given files to :attr:`~current_folder`.
-        Accepts a str or list/tuple of file names.
+        Accepts a str or list/tuple of file or folder names.
         You can backup your codes and/or config files for later use.
 
-        :param files:
+        :param files_or_folders:
             file to be saved.
+        :param ignore:
+            files or patterns to ignore.
+            Only applicable to folders.
         :return: ``None``.
         """
-        assert isinstance(files, (str, list, tuple)), \
-            'unknown type of \'files\'. Expect list, tuple or string, got {}'.format(type(files))
+        assert isinstance(files_or_folders, (str, list, tuple)), \
+            'unknown type of \'files_or_folders\'. Expect list, tuple or string, got {}'.format(type(files_or_folders))
 
-        files = (files,) if isinstance(files, str) else files
-        for file in files:
+        files_or_folders = (files_or_folders,) if isinstance(files_or_folders, str) else files_or_folders
+        for f in files_or_folders:
             try:
-                copyfile(file, '%s/%s' % (self.file_folder, os.path.split(file)[1]))
+                if os.path.isfile(f):
+                    copyfile(f, '%s/%s' % (self.file_folder, os.path.split(f)[-1]))
+                elif os.path.isdir(f):
+                    copytree(f, '%s/%s' % (self.file_folder, os.path.split(f)[-1]),
+                             ignore=ignore_patterns(*ignore))
             except FileNotFoundError:
-                root_logger.warning('No such file or directory: %s' % file)
+                root_logger.warning('No such file or directory: %s' % f)
 
     @utils.deprecated(backup, '1.1.0')
     def copy_files(self, files):
