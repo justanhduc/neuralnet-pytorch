@@ -64,7 +64,6 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         self.bias_init = bias_init
         self.border_mode = padding
         dilation = _pair(dilation)
-        groups = groups
 
         self.ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(kernel_size, dilation)]
         if isinstance(padding, str):

@@ -22,7 +22,7 @@ autodoc_mock_imports = ['torch', 'numpy', 'visdom', 'matplotlib', 'scipy', 'slac
 # -- Project information -----------------------------------------------------
 
 project = 'Neuralnet-pytorch'
-copyright = '2019, Duc Nguyen'
+copyright = '2020, Duc Nguyen'
 author = 'Duc Nguyen'
 
 # From Theano

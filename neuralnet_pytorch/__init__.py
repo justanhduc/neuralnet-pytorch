@@ -47,7 +47,6 @@ from .layers import *
 from .metrics import *
 from .monitor import *
 from . import optim
-from . import zoo
 
 from .version import author as __author__
 from ._version import get_versions
