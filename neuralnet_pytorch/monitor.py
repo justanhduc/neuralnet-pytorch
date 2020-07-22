@@ -33,10 +33,16 @@ from . import utils
 from .utils import root_logger, log_formatter
 
 matplotlib.use('Agg')
-__all__ = ['Monitor', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
+__all__ = ['Monitor', 'monitor', 'logger', 'track', 'get_tracked_variables', 'eval_tracked_variables', 'hooks']
 _TRACKS = collections.OrderedDict()
 hooks = {}
 lock = utils.ReadWriteLock()
+
+# setup logger
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(log_formatter)
+root_logger.addHandler(consoleHandler)
+logger = root_logger
 
 
 def track(name, x, direction=None):
@@ -162,6 +168,26 @@ def _spawn_defaultdict_ordereddict():
     return collections.OrderedDict()
 
 
+def check_path_init(f):
+    def set_default_path(self, *args, **kwargs):
+        if not self._initialized:
+            logger.info('Working folder not initialized! Initialize working folder to default.')
+            self.set_path()
+            self._initialized = True
+
+        return f(self, *args, **kwargs)
+
+    return set_default_path
+
+
+def standardize_name(f):
+    def func(self, name: str, *args, **kwargs):
+        name = name.replace(' ', '-')
+        f(self, name, *args, **kwargs)
+
+    return func
+
+
 class Monitor:
     """
     Collects statistics and displays the results using various backends.
@@ -175,10 +201,13 @@ class Monitor:
 
     .. code-block:: python
 
-        import neuralnet as nnt
+        from neuralnet_pytorch import monitor as mon
+
+        mon.model_name = 'foo-model'
+        mon.set_path()
+        mon.print_freq = 100
 
         ...
-        mon = nnt.Monitor(print_freq=100)
         for epoch in mon.iter_epoch(range(n_epochs)):
             for data in mon.iter_batch(data_loader):
                 loss = net(data)
@@ -190,8 +219,10 @@ class Monitor:
     ----------
     model_name : str
         name of the model folder.
+        Default: ``None``.
     root : str
         path to store the collected statistics.
+        Default: ``None``.
     current_folder : str
         if given, all the stats will be loaded from the given folder.
         Default: ``None``.
@@ -200,10 +231,10 @@ class Monitor:
         Unit is iteration.
         Default: ``None``.
     num_iters : int
-        number of iterations/epoch.
+        number of iterations per epoch.
         If specified, training iteration percentage will be displayed along with epoch.
         Otherwise, it will be automatically calculated in the first epoch.
-        Default: ``None``.
+        Default: 100.
     prefix : str
         predix for folder name of of each run.
         Default: ``'run'``.
@@ -239,9 +270,9 @@ class Monitor:
     hist_folder
         path to the folder containing the collected histograms.
     """
-    __initialized = False
+    _initialized = False
 
-    def __init__(self, model_name='my_model', root='results', current_folder=None, print_freq=None, num_iters=None,
+    def __init__(self, model_name=None, root=None, current_folder=None, print_freq=100, num_iters=None,
                  prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
         self._iter = 0
         self._last_epoch = 0
@@ -261,54 +292,64 @@ class Monitor:
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
+
+        self.model_name = model_name
+        self.root = root
         self._prefix = prefix
         self._num_iters = num_iters
-
         self.print_freq = print_freq
         self.num_iters = num_iters
-        if current_folder:
-            self.current_folder = os.path.normpath(current_folder)
-            lock.acquire_read()
-            self.load_state()
-            lock.release_read()
-        else:
-            self.path = os.path.join(root, model_name)
-            os.makedirs(self.path, exist_ok=True)
-            self.current_folder = self._get_new_folder()
-            os.mkdir(self.current_folder)
+        self.use_tensorboard = use_tensorboard
+        self.use_visdom = use_visdom
+        self.current_folder = current_folder
+        self.kwargs = kwargs
+        self.plot_folder = None
+        self.file_folder = None
+        self.image_folder = None
+        self.hist_folder = None
+        self.current_run = None
+        if current_folder is not None or model_name is not None:
+            self.set_path(current_folder)
 
+        self.vis = None
         if use_visdom and visdom_available:
-            server = kwargs.pop('server', 'http://localhost')
-            port = kwargs.pop('port', 8097)
-            self.vis = visdom.Visdom(server=server, port=port)
-            if not self.vis.check_connection():
-                from subprocess import Popen, PIPE
-                Popen('visdom', stdout=PIPE, stderr=PIPE)
+            self.init_visdom()
 
-            self.vis.close()
-            print('You can navigate to \'%s:%d\' for visualization' % (server, port))
-        else:
-            self.vis = None
-
-        if use_tensorboard:
-            os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
-            self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
-        else:
-            self.writer = None
-
+        self.writer = None
         self._q = queue.Queue()
         self._thread = threading.Thread(target=self._flush, daemon=True)
         self._thread.start()
 
         self.send_slack = send_slack
         if send_slack:
-            assert kwargs.get('channel', None) is not None and kwargs.get('token', None) is not None, \
-                'channel and token must be provided to send a slack message'
+            self.init_slack()
 
-            if kwargs.get('username', None) is None:
-                kwargs['username'] = 'me'
+        # schedule to flush when the program finishes
+        atexit.register(self._atexit)
 
-        self.kwargs = kwargs
+    def __setattr__(self, attr, val):
+        if self._initialized and attr in ('model_name', 'root', 'current_folder', 'plot_folder', 'file_folder',
+                                          'image_folder', 'hist_folder', 'current_run'):
+            raise ValueError('{} attribute must not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super().__setattr__(attr, val)
+
+    def set_path(self, path=None):
+        if path is None:
+            root = 'results' if self.root is None else self.root
+            model_name = 'my-model' if self.model_name is None else self.model_name
+            path = os.path.join(root, model_name)
+            os.makedirs(path, exist_ok=True)
+            path = self._get_new_folder(path)
+
+        self.current_folder = os.path.normpath(path)
+        if os.path.exists(self.current_folder):
+            lock.acquire_read()
+            self.load_state()
+            lock.release_read()
+        else:
+            os.makedirs(self.current_folder, exist_ok=True)
 
         # make folders to store statistics
         self.plot_folder = os.path.join(self.current_folder, 'plots')
@@ -327,21 +368,11 @@ class Monitor:
         file_handler.setFormatter(log_formatter)
         root_logger.addHandler(file_handler)
 
-        consoleHandler = logging.StreamHandler()
-        consoleHandler.setFormatter(log_formatter)
-        root_logger.addHandler(consoleHandler)
-
-        # schedule to flush when the program finishes
-        atexit.register(self._atexit)
         root_logger.info('Result folder: %s' % self.current_folder)
-        self.__initialized = True
+        self._initialized = True
 
-    def __setattr__(self, attr, val):
-        if self.__initialized and attr in ('model_name', 'root', 'current_folder'):
-            raise ValueError('{} attribute should not be set after {} is '
-                             'initialized'.format(attr, self.__class__.__name__))
-
-        super().__setattr__(attr, val)
+        if self.use_tensorboard:
+            self.init_tensorboard()
 
     def load_state(self):
         self.current_run = os.path.basename(self.current_folder)
@@ -386,8 +417,8 @@ class Monitor:
             root_logger.warning('`log.pkl` not found in `%s`' % os.path.join(self.current_folder, 'files'),
                                 exc_info=True)
 
-    def _get_new_folder(self):
-        runs = [folder for folder in os.listdir(self.path) if folder.startswith(self._prefix)]
+    def _get_new_folder(self, path):
+        runs = [folder for folder in os.listdir(path) if folder.startswith(self._prefix)]
         if not runs:
             idx = 1
         else:
@@ -395,7 +426,34 @@ class Monitor:
             idx = indices[-1] + 1
 
         self.current_run = '{}{}'.format(self._prefix, idx)
-        return os.path.join(self.path, self.current_run)
+        return os.path.join(path, self.current_run)
+
+    def init_tensorboard(self):
+        assert self._initialized, 'Working folder must be set by set_path first.'
+        os.makedirs(os.path.join(self.current_folder, 'tensorboard'), exist_ok=True)
+        self.writer = SummaryWriter(os.path.join(self.current_folder, 'tensorboard'))
+        self.use_tensorboard = True
+
+    def init_visdom(self):
+        server = self.kwargs.pop('server', 'http://localhost')
+        port = self.kwargs.pop('port', 8097)
+        self.vis = visdom.Visdom(server=server, port=port)
+        if not self.vis.check_connection():
+            from subprocess import Popen, PIPE
+            Popen('visdom', stdout=PIPE, stderr=PIPE)
+
+        self.vis.close()
+        print('You can navigate to \'%s:%d\' for visualization' % (server, port))
+        self.use_visdom = True
+
+    def init_slack(self):
+        assert self.kwargs.get('channel', None) is not None and self.kwargs.get('token', None) is not None, \
+            'channel and token must be provided to send a slack message'
+
+        if self.kwargs.get('username', None) is None:
+            self.kwargs['username'] = 'me'
+
+        self.send_slack = True
 
     def iter_epoch(self, iterator):
         """
@@ -410,8 +468,9 @@ class Monitor:
         Examples
         --------
 
+        >>> from neuralnet_pytorch import monitor as mon
+        >>> mon.print_freq = 1000
         >>> num_epochs = 10
-        >>> mon = Monitor(print_freq=1000)
         >>> for epoch in mon.iter_epoch(range(mon.epoch, num_epochs))
         ...     # do something here
 
@@ -443,10 +502,10 @@ class Monitor:
         Examples
         --------
 
-        >>> dataset = ...
+        >>> from neuralnet_pytorch import monitor as mon
+        >>> mon.print_freq = 1000
         >>> data_loader = ...
         >>> num_epochs = 10
-        >>> mon = Monitor(print_freq=1000)
         >>> for epoch in mon.iter_epoch(range(num_epochs)):
         ...     for idx, data in mon.iter_batch(enumerate(data_loader)):
         ...         # do something here
@@ -630,6 +689,7 @@ class Monitor:
     def options(self):
         self._options.clear()
 
+    @standardize_name
     def set_option(self, name, option, value):
         """
         sets option for histogram plotting.
@@ -804,13 +864,15 @@ class Monitor:
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
     def _atexit(self):
-        self.flush()
-        plt.close()
-        if self.writer is not None:
-            self.writer.close()
+        if self._initialized:
+            self.flush()
+            plt.close()
+            if self.writer is not None:
+                self.writer.close()
 
-        self._q.join()
+            self._q.join()
 
+    @check_path_init
     def dump_rep(self, name, obj):
         """
         saves a string representation of the given object.
@@ -826,6 +888,7 @@ class Monitor:
             outfile.write(str(obj))
             outfile.close()
 
+    @check_path_init
     def dump_model(self, network, use_tensorboard=False, *args, **kwargs):
         """
         saves a string representation of the given neural net.
@@ -850,6 +913,7 @@ class Monitor:
         if use_tensorboard:
             self.writer.add_graph(network, *args, **kwargs)
 
+    @check_path_init
     def backup(self, files_or_folders, ignore=()):
         """
         saves a copy of the given files to :attr:`~current_folder`.
@@ -881,6 +945,7 @@ class Monitor:
     def copy_files(self, files):
         self.backup(files)
 
+    @standardize_name
     def plot(self, name: str, value, smooth=0, filter_outliers=True, **kwargs):
         """
         schedules a plot of scalar value.
@@ -913,6 +978,7 @@ class Monitor:
             prefix = kwargs.pop('prefix', 'scalar/')
             self.writer.add_scalar(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
+    @standardize_name
     def plot_matrix(self, name: str, value, labels=None, show_values=False):
         """
         plots the given matrix with colorbar and labels if provided.
@@ -935,6 +1001,7 @@ class Monitor:
         self._mat_since_last_flush[name] = value
         self._mat_since_beginning[name][self.iter] = value
 
+    @standardize_name
     def scatter(self, name: str, value, latest_only=False, **kwargs):
         """
         schedules a scattor plot of (a batch of) points.
@@ -962,6 +1029,7 @@ class Monitor:
         if self.writer is not None:
             self.writer.add_mesh(name, value, global_step=self.iter, **kwargs)
 
+    @standardize_name
     def imwrite(self, name: str, value, latest_only=False, **kwargs):
         """
         schedules to save images.
@@ -1006,6 +1074,7 @@ class Monitor:
             self.writer.add_images(prefix + name.replace(' ', '-'), value,
                                    global_step=self.iter, dataformats='NCHW')
 
+    @standardize_name
     def hist(self, name, value, n_bins=20, latest_only=False, **kwargs):
         """
         schedules a histogram plot of (a batch of) points.
@@ -1056,7 +1125,8 @@ class Monitor:
         self._schedule[when][name]['args'] = args
         self._schedule[when][name]['kwargs'] = kwargs
 
-    def _plot(self, nums, fig, prints):
+    def _plot(self, nums, prints):
+        fig = plt.figure()
         plt.xlabel('iteration')
         for name, val in list(nums.items()):
             smooth = self._options[name].get('smooth')
@@ -1088,8 +1158,10 @@ class Monitor:
                 self.vis.matplot(fig, win=name)
 
             fig.clear()
+        plt.close()
 
-    def _plot_matrix(self, mats, fig):
+    def _plot_matrix(self, mats):
+        fig = plt.figure()
         for name, val in list(mats.items()):
             ax = fig.add_subplot(111)
             im = ax.imshow(val)
@@ -1113,7 +1185,7 @@ class Monitor:
 
             show_values = self._options[name].get('show_values')
             if show_values:
-                 # Loop over data dimensions and create text annotations.
+                # Loop over data dimensions and create text annotations.
                 for (i, j), z in np.ndenumerate(val):
                     ax.text(j, i, z, ha='center', va='center', color='w')
 
@@ -1127,6 +1199,7 @@ class Monitor:
             self.writer.add_image('matrix-' + name.replace(' ', '-'), img,
                                   global_step=self.iter, dataformats='HWC')
             fig.clear()
+        plt.close()
 
     def _imwrite(self, imgs):
         for name, val in list(imgs.items()):
@@ -1165,7 +1238,8 @@ class Monitor:
                 else:
                     raise NotImplementedError
 
-    def _hist(self, nums, fig):
+    def _hist(self, nums):
+        fig = plt.figure()
         for name, val in list(nums.items()):
             n_bins = self._options[name].get('n_bins')
             latest_only = self._options[name].get('latest_only')
@@ -1189,8 +1263,10 @@ class Monitor:
                 fig.colorbar(surf, shrink=0.5, aspect=5)
             fig.savefig(os.path.join(self.hist_folder, name.replace(' ', '_') + '_hist.jpg'))
             fig.clear()
+        plt.close()
 
-    def _scatter(self, points, fig):
+    def _scatter(self, points):
+        fig = plt.figure()
         for name, vals in list(points.items()):
             latest_only = self._options[name].get('latest_only')
             for itt, val in vals.items():
@@ -1207,28 +1283,28 @@ class Monitor:
                     fig.clear()
                 fig.clear()
             fig.clear()
+        plt.close()
 
     def _flush(self):
-        fig = plt.figure()
         while True:
             items = self._q.get()
             it, epoch, nums, mats, imgs, hists, points = items
             prints = []
 
             # plot statistics
-            self._plot(nums, fig, prints)
+            self._plot(nums, prints)
 
             # plot confusion matrix
-            self._plot_matrix(mats, fig)
+            self._plot_matrix(mats)
 
             # save recorded images
             self._imwrite(imgs)
 
             # make histograms of recorded data
-            self._hist(hists, fig)
+            self._hist(hists)
 
             # scatter point set(s)
-            self._scatter(points, fig)
+            self._scatter(points)
 
             lock.acquire_write()
             with open(os.path.join(self.file_folder, 'log.pkl'), 'wb') as f:
@@ -1243,10 +1319,10 @@ class Monitor:
                 f.close()
             lock.release_write()
 
-            iter_show = 'Iteration {}/{} ({:.2f}%) Epoch {}'.format(it % self.num_iters, self.num_iters,
-                                                                    (it % self.num_iters) / self.num_iters * 100.,
-                                                                    epoch + 1) if self.num_iters \
-                else 'Iteration {} Epoch {}'.format(it, epoch)
+            iter_show = 'Epoch {} Iteration {}/{} ({:.2f}%)'.format(
+                epoch + 1, it % self.num_iters, self.num_iters,
+                (it % self.num_iters) / self.num_iters * 100.) if self.num_iters \
+                else 'Epoch {} Iteration {}'.format(epoch + 1, it)
 
             elapsed_time = time.time() - self._timer
             time_unit = 'mins' if elapsed_time < 3600. else 'hrs'
@@ -1262,6 +1338,7 @@ class Monitor:
 
             self._q.task_done()
 
+    @check_path_init
     def flush(self):
         """
         executes all the scheduled plots.
@@ -1302,6 +1379,8 @@ class Monitor:
             pkl.dump(self._dump_files, f, pkl.HIGHEST_PROTOCOL)
         return versioned_filename
 
+    @check_path_init
+    @standardize_name
     def dump(self, name, obj, method='pickle', keep=-1, **kwargs):
         """
         saves the given object.
@@ -1488,3 +1567,6 @@ class Monitor:
 
             f.close()
         return contents
+
+
+monitor = Monitor(use_tensorboard=True)
