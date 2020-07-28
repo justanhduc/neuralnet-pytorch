@@ -308,6 +308,7 @@ class Monitor:
         self.image_folder = None
         self.hist_folder = None
         self.current_run = None
+        self.writer = None
         if current_folder is not None or model_name is not None:
             self.set_path(current_folder)
 
@@ -315,7 +316,6 @@ class Monitor:
         if use_visdom and visdom_available:
             self.init_visdom()
 
-        self.writer = None
         self._q = queue.Queue()
         self._thread = threading.Thread(target=self._flush, daemon=True)
         self._thread.start()
