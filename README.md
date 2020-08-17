@@ -6,6 +6,7 @@
 [![License](https://img.shields.io/github/license/justanhduc/neuralnet-pytorch.svg)](https://github.com/justanhduc/neuralnet-pytorch/blob/master/LICENSE.txt)
 [![Build Status](https://travis-ci.org/justanhduc/neuralnet-pytorch.svg?branch=master)](https://travis-ci.org/justanhduc/neuralnet-pytorch)
 [![Documentation Status](https://readthedocs.org/projects/neuralnet-pytorch/badge/?version=latest)](https://neuralnet-pytorch.readthedocs.io/en/latest/?badge=latest)
+[![codecov](https://codecov.io/gh/justanhduc/neuralnet-pytorch/branch/master/graph/badge.svg)](https://codecov.io/gh/justanhduc/neuralnet-pytorch)
 
 __A high level framework for general purpose neural networks in Pytorch.__
 
@@ -48,7 +49,7 @@ model = nnt.Sequential(input_shape=1)
 model.add_module('conv1', nnt.Conv2d(model.output_shape, 20, 5, padding='half', activation='relu'))
 model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', activation='relu'))
 ```
-which frees you from a lot of memorizations and manual calculations when adding one layer on top of another. 
+which frees you from a lot of memorization and manual calculations when adding one layer on top of another. 
 Theano folks will also find some reminiscence as many functions are highly inspired by Theano.  
 
 # Requirements
