@@ -9,10 +9,9 @@ dist: xenial
 language: python
 
 python:
-  - "3.4"
-  - "3.5"
   - "3.6"
   - "3.7"
+  - "3.8"
 
 before_install:
   - ./.travis/travis_before_install.sh
@@ -30,11 +29,11 @@ install:
 jobs:
   - &normaltest
     stage: test
-    python: "3.5"
-  - <<: *normaltest
     python: "3.6"
   - <<: *normaltest
     python: "3.7"
+  - <<: *normaltest
+    python: "3.8"
 
 script:
   - python --version
