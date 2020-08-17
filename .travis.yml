@@ -21,7 +21,7 @@ before_install:
 install:
   - ./.travis/travis_install.sh
   - source activate pyenv
-  - conda install -y pytorch-cpu torchvision-cpu -c pytorch
+  - conda install -y pytorch torchvision cpuonly -c pytorch
   - pip install pytest
   - pip install flake8
   - pip install -r requirements.txt
