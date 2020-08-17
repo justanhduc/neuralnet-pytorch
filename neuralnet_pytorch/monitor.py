@@ -19,9 +19,8 @@ from shutil import copyfile, copytree, ignore_patterns
 
 try:
     import visdom
-    visdom_available = True
 except ImportError:
-    visdom_available = False
+    visdom = None
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -271,6 +270,10 @@ class Monitor:
         path to the folder containing the collected histograms.
     """
     _initialized = False
+    _begin_epoch_ = 'begin_epoch'
+    _end_epoch_ = 'end_epoch'
+    _begin_iter_ = 'begin_iter'
+    _end_iter_ = 'end_iter'
 
     def __init__(self, model_name=None, root=None, current_folder=None, print_freq=100, num_iters=None,
                  prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
@@ -286,8 +289,12 @@ class Monitor:
         self._points_since_last_flush = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._options = collections.defaultdict(_spawn_defaultdict_ordereddict)
         self._dump_files = collections.OrderedDict()
-        self._schedule = {'beginning': collections.defaultdict(_spawn_defaultdict_ordereddict),
-                          'end': collections.defaultdict(_spawn_defaultdict_ordereddict)}
+        self._schedule = {
+            self._begin_epoch_: collections.defaultdict(_spawn_defaultdict_ordereddict),
+            self._end_epoch_: collections.defaultdict(_spawn_defaultdict_ordereddict),
+            self._begin_iter_: collections.defaultdict(_spawn_defaultdict_ordereddict),
+            self._end_iter_: collections.defaultdict(_spawn_defaultdict_ordereddict)
+        }
         self._timer = time.time()
         self._io_method = {'pickle_save': self._save_pickle, 'txt_save': self._save_txt,
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
@@ -313,7 +320,7 @@ class Monitor:
             self.set_path(current_folder)
 
         self.vis = None
-        if use_visdom and visdom_available:
+        if use_visdom and visdom is not None:
             self.init_visdom()
 
         self._q = queue.Queue()
@@ -711,18 +718,23 @@ class Monitor:
 
         self._options[name][option] = value
 
-    def run_training(self, net, optim, train_loader, n_epochs, eval_loader=None, valid_freq=None, start_epoch=None,
-                     train_stats_func=None, val_stats_func=None, device=0, *args, **kwargs):
+    def run_training(self, net, solver: T.optim.Optimizer, train_loader, n_epochs: int, closure=None, eval_loader=None,
+                     valid_freq=None, start_epoch=None, scheduler=None, scheduler_iter=False, device=None, *args,
+                     **kwargs):
         """
         Runs the training loop for the given neural network.
 
         :param net:
             must be an instance of :class:`~neuralnet_pytorch.layers.Net`
             and :class:`~neuralnet_pytorch.layers.Module`.
+        :param solver:
+            a solver for optimization.
         :param train_loader:
             provides training data for neural net.
         :param n_epochs:
             number of training epochs.
+        :param closure:
+            a method to calculate loss in each optimization step. Optional.
         :param eval_loader:
             provides validation data for neural net. Optional.
         :param valid_freq:
@@ -731,16 +743,16 @@ class Monitor:
         :param start_epoch:
             the epoch from which training will continue.
             If ``None``, training counter will be set to 0.
-        :param train_stats_func:
-            a custom function to handle statistics returned from the training procedure.
-            If ``None``, a default handler will be used.
-            For a list of supported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
-        :param val_stats_func:
-            a custom function to handle statistics returned from the validation procedure.
-            If ``None``, a default handler will be used.
-            For a list of suported statistics, see :class:`~neuralnet_pytorch.layers.Net`.
+        :param scheduler:
+            a learning rate scheduler.
+            Default: ``None``.
+        :param scheduler_iter:
+            if ``True``, `scheduler` will run every iteration.
+            Otherwise, it will step every epoch.
+            Default: ``False``.
         :param device:
             device to perform calculation.
+            Default: ``None``.
         :param args:
             additional arguments that will be passed to neural net.
         :param kwargs:
@@ -753,114 +765,111 @@ class Monitor:
         .. code-block:: python
 
             import neuralnet_pytorch as nnt
+            from neuralnet_pytorch import monitor as mon
 
             class MyNet(nnt.Net, nnt.Module):
                 ...
+
+
+                def train_procedure(batch, *args, **kwargs):
+                    loss = ...
+                    mon.plot('train loss', loss)
+                    return loss
+
+                def eval_procedure(batch, *args, **kwargs):
+                    pred = ...
+                    loss = ...
+                    acc = ...
+                    mon.plot('eval loss', loss)
+                    mon.plot('eval accuracy', acc)
 
             # define the network, and training and testing loaders
             net = MyNet(...)
             train_loader = ...
             eval_loader = ...
+            solver = ...
+            scheduler = ...
 
             # instantiate a Monitor object
-            mon = Monitor(model_name='my_net', print_freq=100)
-
-            # save string representations of the model, optimization and lr scheduler
-            mon.dump_model(net)
-            mon.dump_rep('optimizer', optim['optimizer'])
-            if optim['scheduler']:
-                mon.dump_rep('scheduler', optim['scheduler'])
+            mon.model_name = 'my_net'
+            mon.print_freq = 100
+            mon.set_path()
 
             # collect the parameters of the network
-            states = {
-                'model_state_dict': net.state_dict(),
-                'opt_state_dict': optim['optimizer'].state_dict()
-            }
-            if optim['scheduler']:
-                states['scheduler_state_dict'] = optim['scheduler'].state_dict()
+            def save_checkpoint():
+                states = {
+                    'states': mon.epoch,
+                    'model_state_dict': net.state_dict(),
+                    'opt_state_dict': solver.state_dict()
+                }
+                if scheduler is not None:
+                    states['scheduler_state_dict'] = scheduler.state_dict()
+
+                mon.dump(name='training.pt', obj=states, type='torch', keep=5)
 
             # save a checkpoint after each epoch and keep only the 5 latest checkpoints
-            mon.schedule(mon.dump, optim, beginning=False, name='training.pt', obj=states, type='torch', keep=5)
-
+            mon.schedule(save_checkpoint)
             print('Training...')
 
             # run the training loop
-            mon.run_training(net, train_loader, n_epochs, eval_loader, valid_freq=val_freq)
+            mon.run_training(net, solver, train_loader, n_epochs, eval_loader=eval_loader, scheduler=scheduler,
+                             valid_freq=val_freq)
             print('Training finished!')
+
+        Parameters
+        ----------
+        solver
+        scheduler
+        scheduler
         """
 
-        assert isinstance(net, layers.Net), 'net must be an instance of Net'
         assert isinstance(net, (layers.Module, nn.Module, layers.Sequential, nn.Sequential)), \
-            'net must be an instance of Module or Sequential'
-
-        collect = {
-            'scalars': self.plot,
-            'images': self.imwrite,
-            'histograms': self.hist,
-            'pointclouds': self.scatter
-        }
+            '`net` must be an instance of `Module` or `Sequential`'
+        assert hasattr(net, 'train_procedure'), '`train_procedure` method must be defined for `net`'
 
         net = net.to(device)
         start_epoch = self.epoch if start_epoch is None else start_epoch
-        for epoch in self.iter_epoch(range(start_epoch, n_epochs)):
-            if optim['scheduler'] is not None:
-                optim['scheduler'].step(epoch)
-
-            for func_dict in self._schedule['beginning'].values():
+        for _ in self.iter_epoch(range(start_epoch, n_epochs)):
+            for func_dict in self._schedule[self._begin_epoch_].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
             for it, batch in self.iter_batch(enumerate(train_loader)):
+                for func_dict in self._schedule[self._begin_iter_].values():
+                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+
                 net.train(True)
                 batch = utils.batch_to_device(batch, device=device)
-
-                net.learn(optim, *batch, *args, **kwargs)
-
-                if train_stats_func is None:
-                    for t, d in net.stats['train'].items():
-                        for k, v in d.items():
-                            if t == 'scalars':
-                                if np.isnan(v) or np.isinf(v):
-                                    raise ValueError('{} is NaN/inf. Training failed!'.format(k))
-
-                            collect[t](k, v)
+                solver.zero_grad()
+                loss = net.train_procedure(batch, *args, **kwargs)
+                if not (T.isnan(loss) or T.isinf(loss)):
+                    loss.backward()
                 else:
-                    train_stats_func(net.stats['train'], it)
+                    raise ValueError('NaN or Inf encountered. Training failed!')
 
-                if valid_freq:
+                solver.step(closure)
+                if scheduler is not None and scheduler_iter:
+                    scheduler.step()
+
+                for func_dict in self._schedule[self._end_iter_].values():
+                    func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
+
+                if valid_freq and hasattr(net, 'evaluate'):
                     if self.iter % valid_freq == 0:
                         net.eval()
 
                         with T.set_grad_enabled(False):
-                            eval_dict = {
-                                'scalars': collections.defaultdict(lambda: []),
-                                'histograms': collections.defaultdict(lambda: [])
-                            }
-
                             for itt, batch in enumerate(eval_loader):
                                 batch = utils.batch_to_device(batch, device=device)
                                 try:
-                                    net.eval_procedure(*batch, *args, **kwargs)
+                                    net.eval_procedure(batch, *args, **kwargs)
                                 except NotImplementedError:
                                     root_logger.exception('An evaluation procedure must be specified')
                                     raise
 
-                                if val_stats_func is None:
-                                    for t, d in net.stats['eval'].items():
-                                        if t in ('scalars', 'histograms'):
-                                            for k, v in d.items():
-                                                eval_dict[t][k].append(v)
-                                        else:
-                                            for k, v in d.items():
-                                                collect[t](k + '_%d' % itt, v)
-                                else:
-                                    val_stats_func(net.stats['eval'], itt)
+            if scheduler is not None and not scheduler_iter:
+                scheduler.step()
 
-                            for t in ('scalars', 'histograms'):
-                                for k, v in eval_dict[t].items():
-                                    v = np.mean(v) if t == 'scalars' else np.concatenate(v)
-                                    collect[t](k, v)
-
-            for func_dict in self._schedule['end'].values():
+            for func_dict in self._schedule[self._end_epoch_].values():
                 func_dict['func'](*func_dict['args'], **func_dict['kwargs'])
 
     def _atexit(self):
@@ -868,6 +877,7 @@ class Monitor:
             self.flush()
             plt.close()
             if self.writer is not None:
+                self.writer.flush()
                 self.writer.close()
 
             self._q.join()
@@ -1103,14 +1113,17 @@ class Monitor:
             prefix = kwargs.pop('prefix', 'hist/')
             self.writer.add_histogram(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
 
-    def schedule(self, func, beginning=True, *args, **kwargs):
+    def schedule(self, func, when=None, *args, **kwargs):
         """
         uses to schedule a routine during every epoch in :meth:`~run_training`.
 
         :param func:
             a routine to be executed in :meth:`~run_training`.
-        :param beginning:
-            whether to run at the beginning of every epoch. Default: ``True``.
+        :param when:
+            the moment when the ``func`` is executed.
+            For the moment, choices are:
+            ``'begin_epoch'``, ``'end_epoch'``, ``'begin_iter'``, and ``'end_iter'``.
+            Default: ``'begin_epoch'``.
         :param args:
             additional arguments to `func`.
         :param kwargs:
@@ -1120,7 +1133,9 @@ class Monitor:
 
         assert callable(func), 'func must be callable'
         name = func.__name__
-        when = 'beginning' if beginning else 'end'
+        if when is None:
+            when = self._begin_epoch_
+
         self._schedule[when][name]['func'] = func
         self._schedule[when][name]['args'] = args
         self._schedule[when][name]['kwargs'] = kwargs

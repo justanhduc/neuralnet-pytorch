@@ -5,85 +5,8 @@ import torch.nn as nn
 
 from .. import utils
 
-__all__ = ['Net', 'wrapper', 'Sequential', 'Lambda', 'Module', 'MultiSingleInputModule', 'MultiMultiInputModule',
+__all__ = ['wrapper', 'Sequential', 'Lambda', 'Module', 'MultiSingleInputModule', 'MultiMultiInputModule',
            'SingleMultiInputModule']
-
-
-class Net:
-    """
-    This abstract class is useful when you want to use
-    :meth:`~neuralnet_pytorch.monitor.Monitor.run_training`.
-    For a start, subclass this as the first parent.
-    Then specify your optimization and schedule methods using :attr:`~optim`.
-    You can specify your training procedure in :attr:`~train_procedure` and
-    use :meth:`~learn` to perform optimization.
-    If :meth:`~eval_procedure` is specified,
-    Use :attr:`~stats` to collect your interested statistics from your training
-    and evaluation.
-    These statistics can be printed out or displayed in Tensorboard via
-    :class:`~neuralnet_pytorch.monitor.Monitor`.
-
-    Parameters
-    ----------
-    args
-        arguments to be passed to `super`.
-    kwargs
-        keyword arguments to be passed to `super`.
-
-    Attributes
-    ----------
-    optim
-        a dictionary that contains the optimizer and scheduler for optimization.
-    stats
-        a dictionary to hold the interested statistics from training and evaluation.
-        For each ``'train'`` and ``'eval'`` keys, an other dictionary with several
-        built-in keys.
-        The possible keys are: ``'scalars'``, ``'images'``, ``'histograms'``,
-        and  ``'pointclouds'``.
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.stats = {'train': {
-                'scalars': {},
-                'images': {},
-                'histograms': {},
-                'pointclouds': {}
-            },
-            'eval': {
-                'scalars': {},
-                'images': {},
-                'histograms': {},
-                'pointclouds': {}
-            }
-        }
-
-    def train_procedure(self, *args, **kwargs):
-        """
-        Your training instructions can be specified here.
-        This can return the loss to be optimized in :meth:`~learn`.
-        You can use :attr:`~stats` to record the interested statistics.
-        """
-
-        raise NotImplementedError
-
-    def learn(self, optim, *args, **kwargs):
-        """
-        The optimization can be defined here.
-        Usually, it includes zeroing gradients, optimizing the loss,
-        and collect statistics.
-        """
-
-        raise NotImplementedError
-
-    def eval_procedure(self, *args, **kwargs):
-        """
-        If specified, an evaluation will be performed for your model.
-        Use :attr:`~stats` to collect statistics.
-        """
-
-        raise NotImplementedError
 
 
 class _LayerMethod:

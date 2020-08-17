@@ -454,12 +454,14 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
     Calculates the pair-wise distance between two sets of points.
 
     :param x:
-        a tensor of shape ``(m, nx, d)``.
+        a tensor of shape ``(m, nx, d)`` or ``(nx, d)``.
+        If the tensor dimension is 2, the tensor batch dim is broadcasted.
     :param y:
-        a tensor of shape ``(m, ny, d)``.
+        a tensor of shape ``(m, ny, d)`` or ``(ny, d)``.
+        If the tensor dimension is 2, the tensor batch dim is broadcasted.
     :param c_code:
         whether to use a C++ implementation.
-        Default: ``True``.
+        Default: ``True`` when the CUDA extension is installed. ``False`` otherwise.
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
@@ -476,9 +478,9 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
         from ..extensions import batch_pairwise_dist
         return batch_pairwise_dist(x, y)
     else:
-        xx = T.matmul(x, x.transpose(-2, -1))
-        yy = T.matmul(y, y.transpose(-2, -1))
-        zz = T.matmul(x, y.transpose(-2, -1))
+        xx = T.einsum('...ij,...kj->...ik', x, x)
+        yy = T.einsum('...ij,...kj->...ik', y, y)
+        zz = T.einsum('...ij,...kj->...ik', x, y)
 
         diag_ind_x = T.arange(0, x.shape[-2]).to(device=x.device, dtype=T.long)
         diag_ind_y = T.arange(0, y.shape[-2]).to(device=x.device, dtype=T.long)
