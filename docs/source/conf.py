@@ -16,6 +16,7 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('../..'))
 import versioneer
+from neuralnet_pytorch import zoo
 
 autodoc_mock_imports = ['torch', 'numpy', 'visdom', 'matplotlib', 'scipy', 'slackclient', 'tb-nightly', 'imageio']
 

@@ -26,8 +26,6 @@ which enables faster and more convenient training and testing of your neural net
 
 .. autoclass:: neuralnet_pytorch.layers.abstract._LayerMethod
     :members:
-.. autoclass:: neuralnet_pytorch.layers.Net
-    :members:
 .. autoclass:: neuralnet_pytorch.layers.MultiSingleInputModule
 .. autoclass:: neuralnet_pytorch.layers.MultiMultiInputModule
 
