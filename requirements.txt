@@ -1,11 +1,9 @@
 numpy
+scipy
 visdom
 matplotlib <= 3.1.0
 slackclient
-tb-nightly
+tensorboard
 imageio
 gin-config
 future
-tensorboardX
-pykeops[optional]
-geomloss[optional]
