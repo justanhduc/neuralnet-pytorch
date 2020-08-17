@@ -7,6 +7,7 @@ import torchvision
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import cuda_available
+from neuralnet_pytorch import zoo
 
 dev = ('cpu', 'cuda') if cuda_available else ('cpu',)
 
@@ -565,23 +566,23 @@ def test_adain(device, dim1, dim2):
 @pytest.mark.parametrize('device', dev)
 @pytest.mark.parametrize(
     ('model_pt', 'model_nnt'),
-    ((torchvision.models.resnet18, nnt.zoo.resnet18),
-     (torchvision.models.resnet34, nnt.zoo.resnet34),
-     (torchvision.models.resnet50, nnt.zoo.resnet50),
-     (torchvision.models.resnet101, nnt.zoo.resnet101),
-     (torchvision.models.resnet152, nnt.zoo.resnet152),
-     (torchvision.models.resnext50_32x4d, nnt.zoo.resnext50_32x4d),
-     (torchvision.models.resnext101_32x8d, nnt.zoo.resnext101_32x8d),
-     (torchvision.models.wide_resnet50_2, nnt.zoo.wide_resnet50_2),
-     (torchvision.models.wide_resnet101_2, nnt.zoo.wide_resnet101_2),
-     (torchvision.models.vgg11, nnt.zoo.vgg11),
-     (torchvision.models.vgg11_bn, nnt.zoo.vgg11_bn),
-     (torchvision.models.vgg13, nnt.zoo.vgg13),
-     (torchvision.models.vgg13_bn, nnt.zoo.vgg13_bn),
-     (torchvision.models.vgg16, nnt.zoo.vgg16),
-     (torchvision.models.vgg16_bn, nnt.zoo.vgg16_bn),
-     (torchvision.models.vgg19, nnt.zoo.vgg19),
-     (torchvision.models.vgg19_bn, nnt.zoo.vgg19_bn))
+    ((torchvision.models.resnet18, zoo.resnet18),
+     (torchvision.models.resnet34, zoo.resnet34),
+     (torchvision.models.resnet50, zoo.resnet50),
+     (torchvision.models.resnet101, zoo.resnet101),
+     (torchvision.models.resnet152, zoo.resnet152),
+     (torchvision.models.resnext50_32x4d, zoo.resnext50_32x4d),
+     (torchvision.models.resnext101_32x8d, zoo.resnext101_32x8d),
+     (torchvision.models.wide_resnet50_2, zoo.wide_resnet50_2),
+     (torchvision.models.wide_resnet101_2, zoo.wide_resnet101_2),
+     (torchvision.models.vgg11, zoo.vgg11),
+     (torchvision.models.vgg11_bn, zoo.vgg11_bn),
+     (torchvision.models.vgg13, zoo.vgg13),
+     (torchvision.models.vgg13_bn, zoo.vgg13_bn),
+     (torchvision.models.vgg16, zoo.vgg16),
+     (torchvision.models.vgg16_bn, zoo.vgg16_bn),
+     (torchvision.models.vgg19, zoo.vgg19),
+     (torchvision.models.vgg19_bn, zoo.vgg19_bn))
 )
 def test_pretrained_models(device, model_pt, model_nnt):
     model_pt = model_pt(True).to(device).eval()

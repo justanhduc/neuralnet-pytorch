@@ -63,8 +63,8 @@ def test_monitor(device):
     mon.dump('foo.pkl', a)
     loaded = mon.load('foo.pkl')
     testing.assert_allclose(a, loaded)
-    mon.reset()
 
+    mon.epoch = 0
     for epoch in mon.iter_epoch(range(n_epochs)):
         for it in mon.iter_batch(range(n_iters)):
             mon.dump('foo.pkl', a + it, keep=3)
@@ -75,13 +75,12 @@ def test_monitor(device):
 
     loaded = mon.load('foo.pkl', version=48)
     testing.assert_allclose(a + 8., loaded)
-    mon.reset()
 
     mon.dump('foo.txt', nnt.utils.to_numpy(a), 'txt')
     loaded = T.from_numpy(mon.load('foo.txt', 'txt', dtype='float32')).to(device)
     testing.assert_allclose(a, loaded)
-    mon.reset()
 
+    mon.epoch = 0
     for epoch in mon.iter_epoch(range(n_epochs)):
         for it in mon.iter_batch(range(n_iters)):
             mon.plot('parabol2', (it + epoch) ** 2)
@@ -89,13 +88,12 @@ def test_monitor(device):
             mon.dump('foo.txt', nnt.utils.to_numpy(a + it), 'txt', keep=3)
     loaded = T.from_numpy(mon.load('foo.txt', 'txt', version=48, dtype='float32')).to(device)
     testing.assert_allclose(a + 8., loaded)
-    mon.reset()
 
     mon.dump('foo.pt', {'a': a}, 'torch')
     loaded = mon.load('foo.pt', 'torch')['a']
     testing.assert_allclose(a, loaded)
-    mon.reset()
 
+    mon.epoch = 0
     for epoch in mon.iter_epoch(range(n_epochs)):
         for it in mon.iter_batch(range(n_iters)):
             mon.plot('parabol3', (it + epoch) ** 2)
@@ -103,7 +101,6 @@ def test_monitor(device):
             mon.dump('foo.pt', {'a': a + it}, 'torch', keep=4)
     loaded = mon.load('foo.pt', 'torch', version=49)['a']
     testing.assert_allclose(a + 9, loaded)
-    mon.reset()
 
 
 @pytest.mark.parametrize(
@@ -145,6 +142,9 @@ def test_slicing_sequential(idx):
 @pytest.mark.parametrize('drop_last', (True, False))
 @pytest.mark.parametrize('pin_memory', (True, False))
 def test_dataloader(device, bs, shuffle, drop_last, pin_memory):
+    if device == 'cpu' and pin_memory:
+        pytest.skip('Skip test for pin_memory=True and device=cpu')
+
     from torch.utils.data import TensorDataset
     data, label = T.arange(10), T.arange(10) + 10
     dataset = TensorDataset(data, label)
