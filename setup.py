@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 import os
 import versioneer
 
+cwd = os.getcwd()
 version_data = versioneer.get_versions()
 CMD_CLASS = versioneer.get_cmdclass()
 
@@ -25,7 +26,7 @@ def get_extensions():
         import glob
         from torch.utils.cpp_extension import BuildExtension, CUDAExtension
         CMD_CLASS.update({'build_ext': BuildExtension})
-        ext_root = 'neuralnet_pytorch/extensions'
+        ext_root = os.path.join(cwd, 'neuralnet_pytorch/extensions')
         ext_src = glob.glob(os.path.join(ext_root, 'csrc/*.cpp')) + glob.glob(os.path.join(ext_root, 'csrc/*.cu'))
         ext_include = os.path.join(ext_root, 'include')
         sys.argv.remove("--cuda-ext")
