@@ -16,6 +16,7 @@ import logging
 from matplotlib import cm
 from imageio import imwrite
 from shutil import copyfile, copytree, ignore_patterns
+from collections import namedtuple
 
 try:
     import visdom
@@ -36,6 +37,7 @@ __all__ = ['Monitor', 'monitor', 'logger', 'track', 'get_tracked_variables', 'ev
 _TRACKS = collections.OrderedDict()
 hooks = {}
 lock = utils.ReadWriteLock()
+Git = namedtuple('Git', ('branch', 'commit_id', 'commit_message', 'commit_datetime', 'commit_user', 'commit_email'))
 
 # setup logger
 consoleHandler = logging.StreamHandler()
@@ -302,7 +304,7 @@ class Monitor:
 
         self.model_name = model_name
         self.root = root
-        self._prefix = prefix
+        self.prefix = prefix
         self._num_iters = num_iters
         self.print_freq = print_freq
         self.num_iters = num_iters
@@ -316,6 +318,17 @@ class Monitor:
         self.hist_folder = None
         self.current_run = None
         self.writer = None
+
+        if os.system('git rev-parse') == 0:
+            import git
+
+            repo = git.Repo(os.getcwd())
+            head = repo.head.reference
+            self.git = Git(head.name, head.commit.hexsha, head.commit.message.rstrip(), head.commit.committed_date,
+                           head.commit.author.name, head.commit.author.email)
+        else:
+            self.git = None
+
         if current_folder is not None or model_name is not None:
             self.set_path(current_folder)
 
@@ -336,7 +349,7 @@ class Monitor:
 
     def __setattr__(self, attr, val):
         if self._initialized and attr in ('model_name', 'root', 'current_folder', 'plot_folder', 'file_folder',
-                                          'image_folder', 'hist_folder', 'current_run'):
+                                          'image_folder', 'hist_folder', 'current_run', 'prefix'):
             raise ValueError('{} attribute must not be set after {} is '
                              'initialized'.format(attr, self.__class__.__name__))
 
@@ -425,14 +438,14 @@ class Monitor:
                                 exc_info=True)
 
     def _get_new_folder(self, path):
-        runs = [folder for folder in os.listdir(path) if folder.startswith(self._prefix)]
+        runs = [folder for folder in os.listdir(path) if folder.startswith(self.prefix)]
         if not runs:
             idx = 1
         else:
-            indices = sorted([int(r[len(self._prefix):]) for r in runs])
+            indices = sorted([int(r[len(self.prefix):]) for r in runs])
             idx = indices[-1] + 1
 
-        self.current_run = '{}{}'.format(self._prefix, idx)
+        self.current_run = '{}-{}'.format(self.prefix, idx)
         return os.path.join(path, self.current_run)
 
     def init_tensorboard(self):
@@ -461,6 +474,15 @@ class Monitor:
             self.kwargs['username'] = 'me'
 
         self.send_slack = True
+
+    @check_path_init
+    def show_git_info(self):
+        import datetime
+
+        root_logger.info('Current branch: {}'.format(self.git.branch))
+        root_logger.info('Latest commit id: {}'.format(self.git.commit_id))
+        root_logger.info('Latest commit message: {}'.format(self.git.commit_messhage))
+        root_logger.info('Latest commit date: {}'.format(datetime.datetime.fromtimestamp(self.git.commit_datetime)))
 
     def iter_epoch(self, iterator):
         """
