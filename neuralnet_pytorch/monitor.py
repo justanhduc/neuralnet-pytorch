@@ -924,7 +924,7 @@ class Monitor:
             self.writer.add_graph(network, *args, **kwargs)
 
     @check_path_init
-    def backup(self, files_or_folders, ignore=()):
+    def backup(self, files_or_folders, ignore=None):
         """
         saves a copy of the given files to :attr:`~current_folder`.
         Accepts a str or list/tuple of file or folder names.
@@ -934,20 +934,29 @@ class Monitor:
             file to be saved.
         :param ignore:
             files or patterns to ignore.
-            Only applicable to folders.
+            Default: ``None``.
         :return: ``None``.
         """
         assert isinstance(files_or_folders, (str, list, tuple)), \
             'unknown type of \'files_or_folders\'. Expect list, tuple or string, got {}'.format(type(files_or_folders))
 
         files_or_folders = (files_or_folders,) if isinstance(files_or_folders, str) else files_or_folders
+        if ignore is None:
+            ignore = ()
+
+        # filter ignored files
+        import fnmatch
+        to_backup = []
         for f in files_or_folders:
+            if not any(fnmatch.fnmatch(f, p) for p in ignore):
+                to_backup.append(f)
+
+        for f in to_backup:
             try:
                 if os.path.isfile(f):
                     copyfile(f, '%s/%s' % (self.file_folder, os.path.split(f)[-1]))
                 elif os.path.isdir(f):
-                    copytree(f, '%s/%s' % (self.file_folder, os.path.split(f)[-1]),
-                             ignore=ignore_patterns(*ignore))
+                    copytree(f, '%s/%s' % (self.file_folder, os.path.split(f)[-1]))
             except FileNotFoundError:
                 root_logger.warning('No such file or directory: %s' % f)
 
