@@ -302,7 +302,7 @@ class Monitor:
                            'torch_save': self._save_torch, 'pickle_load': self._load_pickle,
                            'txt_load': self._load_txt, 'torch_load': self._load_torch}
 
-        self.model_name = model_name
+        self.model_name = 'my-model' if model_name is None else model_name
         self.root = root
         self.prefix = prefix
         self._num_iters = num_iters
@@ -358,8 +358,7 @@ class Monitor:
     def set_path(self, path=None):
         if path is None:
             root = 'results' if self.root is None else self.root
-            model_name = 'my-model' if self.model_name is None else self.model_name
-            path = os.path.join(root, model_name)
+            path = os.path.join(root, self.model_name)
             os.makedirs(path, exist_ok=True)
             path = self._get_new_folder(path)
 
@@ -442,7 +441,7 @@ class Monitor:
         if not runs:
             idx = 1
         else:
-            indices = sorted([int(r[len(self.prefix):]) for r in runs])
+            indices = sorted([int(r[len(self.prefix)+1:]) for r in runs])
             idx = indices[-1] + 1
 
         self.current_run = '{}-{}'.format(self.prefix, idx)
@@ -563,6 +562,56 @@ class Monitor:
         self.iter += 1
         if self.num_iters:
             self.epoch = self.iter // self.num_iters
+
+    @property
+    def prefix(self):
+        """
+        returns the prefix of saved folders.
+
+        :return:
+            :attr:`~_prefix`.
+        """
+
+        return self._prefix
+
+    @prefix.setter
+    @standardize_name
+    def prefix(self, p):
+        """
+        sets the prefix of the saved folder.
+
+        :param p:
+            prefix to set.
+        :return:
+            ``None``.
+        """
+
+        self._prefix = p
+
+    @property
+    def model_name(self):
+        """
+        returns the name of the model.
+
+        :return:
+            :attr:`~_model_name`.
+        """
+
+        return self._model_name
+
+    @model_name.setter
+    @standardize_name
+    def model_name(self, name):
+        """
+        sets the name of the model.
+
+        :param name:
+            name to set.
+        :return:
+            ``None``.
+        """
+
+        self._model_name = name
 
     @property
     def iter(self):
