@@ -267,7 +267,7 @@ class FC(nn.Linear, _LayerMethod):
         self.flatten = flatten
         self.keepdim = keepdim
         self.activation = utils.function(activation, **kwargs)
-        super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
+        super().__init__(int(np.prod(self.input_shape[1:])) if flatten else self.input_shape[-1], out_features, bias)
 
     def forward(self, input, *args, **kwargs):
         if self.flatten:

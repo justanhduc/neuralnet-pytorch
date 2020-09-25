@@ -2,6 +2,8 @@ from collections import OrderedDict
 
 import torch as T
 import torch.nn as nn
+from torch._six import container_abcs
+import sympy as sp
 
 from .. import utils
 
@@ -13,6 +15,24 @@ class _LayerMethod:
     """
     This mixin class contains various attributes to extend :mod:`torch` modules.
     """
+
+    @property
+    def input_shape(self):
+        return self._input_shape
+
+    @input_shape.setter
+    def input_shape(self, input_shape):
+        if input_shape is None or isinstance(input_shape, (int, sp.Symbol)):
+            shape = input_shape
+        elif isinstance(input_shape, str):
+            shape = sp.symbols(input_shape, integer=True)
+        elif isinstance(input_shape, container_abcs.Iterable):
+            shape = [sp.symbols(s, integer=True) if isinstance(s, str)
+                     else sp.symbols('x{}'.format(i), integer=True) if s is None
+                     else s for i, s in enumerate(input_shape)]
+            shape = tuple(shape)
+
+        self._input_shape = shape
 
     @property
     @utils.validate
@@ -145,20 +165,20 @@ class MultiSingleInputModule(Module):
             'All items in modules_or_tensors should be Pytorch modules or tensors'
 
         super().__init__()
-        self.input_shape = []
+        input_shapes = []
 
         def foo(item):
             idx = len(list(self.children()))
             if isinstance(item, nn.Module):
                 self.add_module('module%d' % idx, item)
-                self.input_shape.append(item.output_shape)
+                input_shapes.append(item.output_shape)
             else:
                 self.add_module('tensor%d' % idx, Lambda(lambda *args, **kwargs: item, input_shape=item.shape,
                                                          output_shape=item.shape))
-                self.input_shape.append(item.shape)
+                input_shapes.append(item.shape)
 
         list(map(foo, modules_or_tensors))
-        self.input_shape = tuple(self.input_shape)
+        self.input_shape = tuple(input_shapes)
 
     def forward(self, input, *args, **kwargs):
         outputs = [module(input, *args, **kwargs) for name, module in self.named_children()]
@@ -303,7 +323,7 @@ def wrapper(input_shape=None, output_shape=None, *args, **kwargs):
 
         foo = Foo()
     """
-    assert input_shape is None or isinstance(input_shape, (int, list, tuple)), 'Unknown type of input_shape'
+    assert input_shape is None or isinstance(input_shape, (int, container_abcs.Iterable)), 'Unknown type of input_shape'
     if isinstance(input_shape, int):
         input_shape = (input_shape,)
 

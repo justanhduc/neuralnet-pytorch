@@ -4,6 +4,7 @@ from torch import testing
 from torch.nn import functional as F
 import pytest
 import torchvision
+import sympy as sp
 
 import neuralnet_pytorch as nnt
 from neuralnet_pytorch import cuda_available
@@ -29,11 +30,9 @@ def sanity_check(module1, module2, shape=None, *args, **kwargs):
 
         expected = module2(input)
         testing.assert_allclose(module1(input), expected)
-        testing.assert_allclose(module1.output_shape, tuple(expected.shape))
     else:
         expected = module2(args)
         testing.assert_allclose(module1(*args), expected)
-        testing.assert_allclose(module1.output_shape, tuple(expected.shape))
 
 
 def conv1x1(in_planes, out_planes, stride=1):
@@ -43,42 +42,44 @@ def conv1x1(in_planes, out_planes, stride=1):
 
 @pytest.mark.parametrize('device', dev)
 @pytest.mark.parametrize(
-    ('filter_size', 'stride', 'padding', 'dilation', 'output_shape'),
-    ((3, 1, 0, 1, (2, 5, 8, 8)),
-     (3, 1, 1, 1, (2, 5, 10, 10)),
-     (3, 2, 0, 1, (2, 5, 4, 4)),
-     (3, 2, 1, 1, (2, 5, 5, 5)),
-     (3, 1, 0, 2, (2, 5, 6, 6)),
-     (3, 1, 1, 2, (2, 5, 8, 8)),
-     (3, 2, 0, 2, (2, 5, 3, 3)),
-     (3, 2, 1, 2, (2, 5, 4, 4)),
-     (4, 1, 0, 1, (2, 5, 7, 7)),
-     (4, 1, 1, 1, (2, 5, 9, 9)),
-     (4, 2, 0, 1, (2, 5, 4, 4)),
-     (4, 2, 1, 1, (2, 5, 5, 5)),
-     (4, 1, 2, 1, (2, 5, 11, 11)),
-     (4, 2, 2, 1, (2, 5, 6, 6)),
-     (4, 1, 0, 2, (2, 5, 4, 4)),
-     (4, 1, 1, 2, (2, 5, 6, 6)),
-     (4, 2, 0, 2, (2, 5, 2, 2)),
-     (4, 2, 1, 2, (2, 5, 3, 3)),
-     (4, 1, 2, 2, (2, 5, 8, 8)),
-     (4, 2, 2, 2, (2, 5, 4, 4)))
+    ('filter_size', 'stride', 'padding', 'dilation'),
+    ((3, 1, 0, 1),
+     (3, 1, 1, 1),
+     (3, 2, 0, 1),
+     (3, 2, 1, 1),
+     (3, 1, 0, 2),
+     (3, 1, 1, 2),
+     (3, 2, 0, 2),
+     (3, 2, 1, 2),
+     (4, 1, 0, 1),
+     (4, 1, 1, 1),
+     (4, 2, 0, 1),
+     (4, 2, 1, 1),
+     (4, 1, 2, 1),
+     (4, 2, 2, 1),
+     (4, 1, 0, 2),
+     (4, 1, 1, 2),
+     (4, 2, 0, 2),
+     (4, 2, 1, 2),
+     (4, 1, 2, 2),
+     (4, 2, 2, 2))
 )
-def test_conv2d_layer(device, filter_size, stride, padding, dilation, output_shape):
+def test_conv2d_layer(device, filter_size, stride, padding, dilation):
+    shape_sym = ('b', 3, 'h', 'w')
     shape = (2, 3, 10, 10)
     n_filters = 5
 
-    conv_nnt = nnt.Conv2d(shape, n_filters, filter_size, stride, padding, dilation).to(device)
+    conv_nnt = nnt.Conv2d(shape_sym, n_filters, filter_size, stride, padding, dilation).to(device)
     conv_pt = T.nn.Conv2d(shape[1], n_filters, filter_size, stride, padding, dilation).to(device)
     sanity_check(conv_nnt, conv_pt, shape, device=device)
 
     input = T.arange(np.prod(shape)).view(*shape).float().to(device)
-    out_nnt = conv_nnt(input)
     out_pt = conv_pt(input)
-    testing.assert_allclose(conv_nnt.output_shape, out_pt.shape)
-    testing.assert_allclose(out_nnt.shape, output_shape)
-    testing.assert_allclose(conv_nnt.output_shape, output_shape)
+
+    h = conv_nnt.output_shape[2].subs(conv_nnt.input_shape[2], shape[2])
+    w = conv_nnt.output_shape[3].subs(conv_nnt.input_shape[3], shape[3])
+    assert h == out_pt.shape[2]
+    assert w == out_pt.shape[3]
 
 
 @pytest.mark.parametrize('device', dev)
@@ -99,19 +100,25 @@ def test_conv2d_layer(device, filter_size, stride, padding, dilation, output_sha
      (4, 2, 2, None, (2, 5, 18, 18)))
 )
 def test_convtranspose2d_layer(device, filter_size, stride, padding, output_size, output_shape):
+    shape_sym = ('b', 3, 'h', 'w')
     shape = (2, 3, 10, 10)
     n_filters = 5
 
-    conv_nnt = nnt.ConvTranspose2d(shape, n_filters, filter_size, stride=stride, padding=padding,
+    conv_nnt = nnt.ConvTranspose2d(shape_sym, n_filters, filter_size, stride=stride, padding=padding,
                                    output_size=output_size).to(device)
     conv_pt = T.nn.ConvTranspose2d(shape[1], n_filters, filter_size, padding=padding, stride=stride).to(device)
 
     input = T.arange(np.prod(shape)).view(*shape).float().to(device)
-    out_nnt = conv_nnt(input)
     out_pt = conv_pt(input, output_size)
-    testing.assert_allclose(conv_nnt.output_shape, out_pt.shape)
-    testing.assert_allclose(out_nnt.shape, output_shape)
-    testing.assert_allclose(conv_nnt.output_shape, output_shape)
+    if output_size is None:
+        sanity_check(conv_nnt, conv_pt, shape, device=device)
+        h = conv_nnt.output_shape[2].subs(conv_nnt.input_shape[2], shape[2])
+        w = conv_nnt.output_shape[3].subs(conv_nnt.input_shape[3], shape[3])
+        assert h == out_pt.shape[2]
+        assert w == out_pt.shape[3]
+    else:
+        out_nnt = conv_nnt(input)
+        assert out_pt.shape == out_nnt.shape
 
 
 @pytest.mark.parametrize('device', dev)
@@ -135,19 +142,12 @@ def test_depthwise_sepconv(device, depth_mul):
 
 
 @pytest.mark.parametrize('device', dev)
-@pytest.mark.parametrize(
-    ('shape', 'output_shape'),
-    (((2, 3), (2, 4)),
-     ((None, 3), (None, 4)),
-     (3, (None, 4)))
-)
-def test_fc_layer(device, shape, output_shape):
+@pytest.mark.parametrize('shape', ((2, 3), (None, 3), 3))
+def test_fc_layer(device, shape):
     out_features = 4
 
     # test constructors
     fc_nnt = nnt.FC(shape, out_features)
-    assert fc_nnt.output_shape == output_shape
-
     fc_nnt = nnt.FC((2, 3), out_features)
     fc_pt = T.nn.Linear(shape[1] if isinstance(shape, tuple) else shape, out_features)
     sanity_check(fc_nnt, fc_pt, shape=(2, 3), device=device)
@@ -167,20 +167,18 @@ def test_softmax(device, dim):
 
 
 @pytest.mark.parametrize('device', dev)
-@pytest.mark.parametrize(
-    ('shape', 'output_shape'),
-    (((2, 3, 4, 5), (2, 3, 4, 5)),
-     (3, (None, 3, None, None)),
-     ((None, 3, 4, None), (None, 3, 4, None)),
-     pytest.param((2, None, 4, 5), (2, None, 4, 5), marks=pytest.mark.xfail))
-)
-def test_batchnorm2d_layer(device, shape, output_shape):
+@pytest.mark.parametrize('shape', ((2, 3, 4, 5), 3, ('b', 3, 4, 'w'),
+                                   pytest.param((2, 'c', 4, 5), marks=pytest.mark.xfail)))
+def test_batchnorm2d_layer(device, shape):
+    input_shape = (2, 3, 4, 5)
     bn_nnt = nnt.BatchNorm2d(shape)
-    assert bn_nnt.output_shape == output_shape
-
-    bn_nnt = nnt.BatchNorm2d((2, 3, 4, 5))
-    bn_pt = T.nn.BatchNorm2d(shape[1] if isinstance(shape, tuple) else shape)
+    bn_pt = T.nn.BatchNorm2d(input_shape[1])
     sanity_check(bn_nnt, bn_pt, shape=(2, 3, 4, 5), device=device)
+
+    for i in range(len(input_shape)):
+        if isinstance(bn_nnt.input_shape[i], sp.Symbol):
+            s = bn_nnt.output_shape[i].subs(bn_nnt.input_shape[i], input_shape[i])
+            assert s == input_shape[i]
 
 
 @pytest.mark.parametrize('device', dev)
@@ -191,10 +189,12 @@ def test_resnet_basic_block(device):
 
     # test constructors
     blk_nnt = nnt.ResNetBasicBlock(shape[1], n_filters)
-    assert blk_nnt.output_shape == (None, n_filters, None, None)
+    assert len(blk_nnt.output_shape) == 4
+    assert blk_nnt.output_shape[1] == 64
 
     blk_nnt = nnt.ResNetBasicBlock((None, shape[1], None, None), n_filters)
-    assert blk_nnt.output_shape == (None, n_filters, None, None)
+    assert len(blk_nnt.output_shape) == 4
+    assert blk_nnt.output_shape[1] == 64
 
     blk_nnt = nnt.ResNetBasicBlock(shape, n_filters)
     blk_pt = resnet.BasicBlock(shape[1], n_filters)
