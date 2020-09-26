@@ -1,7 +1,7 @@
 import numpy as np
 import numbers
 from torch._six import container_abcs
-from itertools import repeat as repeat_
+import sympy as sp
 
 from . import root_logger
 
@@ -13,7 +13,7 @@ def _make_input_shape(m, n):
         if isinstance(x, container_abcs.Iterable):
             return x
 
-        return tuple(repeat_(None, m)) + (x, ) + tuple(repeat_(None, n))
+        return sp.symbols('b:{}'.format(m), iteger=True) + (x,) + sp.symbols('x:{}'.format(n), integer=True)
     return parse
 
 
@@ -31,7 +31,8 @@ def validate(func):
         if isinstance(shape, numbers.Number):
             return int(shape)
 
-        out = [None if x is None or np.isnan(x) else int(x) for x in func(self)]
+        out = [None if x is None or (isinstance(x, numbers.Number) and np.isnan(x))
+               else int(x) if isinstance(x, numbers.Number) else x for x in shape]
         return tuple(out)
 
     return wrapper
@@ -107,6 +108,7 @@ def get_non_none(array):
     :return:
         the first item that is not ``None``.
     """
+    assert isinstance(array, container_abcs.Iterable)
 
     try:
         e = next(item for item in array if item is not None)

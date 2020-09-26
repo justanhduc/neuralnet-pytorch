@@ -530,7 +530,7 @@ def bulk_to_cuda_sparse(xs, non_blocking=False):
     return tuple([to_cuda_sparse(x, non_blocking=non_blocking) for x in xs])
 
 
-def batch_to_device(batch, device=0, non_blocking=False):
+def batch_to_device(batch, device=None, non_blocking=False):
     """
     Moves a batch to the specified device.
 
@@ -538,7 +538,7 @@ def batch_to_device(batch, device=0, non_blocking=False):
         a :class:`torch.Tensor` or an iterable of :class:`torch.Tensor`.
     :param device:
         the destination of the data.
-        Default: ``0``.
+        Default: ``None``.
     :param non_blocking:
         whether to make the program continue without waiting for the move.
         Default: False.
@@ -546,8 +546,10 @@ def batch_to_device(batch, device=0, non_blocking=False):
         a copy of the original batch that on the specified device.
     """
 
-    assert isinstance(device, (int, str, T.device)), 'Unknown type of device'
-    if isinstance(batch, T.Tensor):
+    if device is not None:
+        assert isinstance(device, (int, str, T.device)), 'Unknown type of device'
+
+    if isinstance(batch, T.Tensor) or hasattr(batch, 'to'):
         batch_device = batch.to(device=device, non_blocking=non_blocking)
     else:
         try:

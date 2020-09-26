@@ -6,7 +6,7 @@ import numbers
 
 __all__ = ['dimshuffle', 'shape_padleft', 'shape_padright', 'swapaxes', 'ravel_index', 'tile', 'repeat', 'block_diag',
            'block_diag_sparse', 'get_bilinear_weights', 'interpolate_bilinear', 'batch_pairwise_dist', 'gram_matrix',
-           'var', 'std']
+           'var', 'std', 'break_dim']
 
 
 def dimshuffle(x: T.Tensor, pattern):
@@ -313,7 +313,7 @@ def block_diag_sparse(a: T.Tensor, dense=False):
             [ 0,  0,  0,  0,  0,  0,  0,  0, 20, 21, 22, 23]])
     """
     assert len(a.shape) == 3, \
-        'Input tensor must have 3 dimensions with the last two being matrices, got %d'.format(len(a.shape))
+        'Input tensor must have 3 dimensions with the last two being matrices, got {}'.format(len(a.shape))
 
     n, r, c = a.shape
     y = T.arange(r)
@@ -454,12 +454,14 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
     Calculates the pair-wise distance between two sets of points.
 
     :param x:
-        a tensor of shape ``(m, nx, d)``.
+        a tensor of shape ``(m, nx, d)`` or ``(nx, d)``.
+        If the tensor dimension is 2, the tensor batch dim is broadcasted.
     :param y:
-        a tensor of shape ``(m, ny, d)``.
+        a tensor of shape ``(m, ny, d)`` or ``(ny, d)``.
+        If the tensor dimension is 2, the tensor batch dim is broadcasted.
     :param c_code:
         whether to use a C++ implementation.
-        Default: ``True``.
+        Default: ``True`` when the CUDA extension is installed. ``False`` otherwise.
     :return:
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
@@ -476,18 +478,16 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
         from ..extensions import batch_pairwise_dist
         return batch_pairwise_dist(x, y)
     else:
-        bs, num_points_x, points_dim = x.size()
-        _, num_points_y, _ = y.size()
-        xx = T.bmm(x, x.transpose(2, 1))
-        yy = T.bmm(y, y.transpose(2, 1))
-        zz = T.bmm(x, y.transpose(2, 1))
+        xx = T.einsum('...ij,...kj->...ik', x, x)
+        yy = T.einsum('...ij,...kj->...ik', y, y)
+        zz = T.einsum('...ij,...kj->...ik', x, y)
 
-        diag_ind_x = T.arange(0, num_points_x).to(device=x.device, dtype=T.long)
-        diag_ind_y = T.arange(0, num_points_y).to(device=x.device, dtype=T.long)
+        diag_ind_x = T.arange(0, x.shape[-2]).to(device=x.device, dtype=T.long)
+        diag_ind_y = T.arange(0, y.shape[-2]).to(device=x.device, dtype=T.long)
 
-        rx = xx[:, diag_ind_x, diag_ind_x].unsqueeze(1).expand_as(zz.transpose(2, 1))
-        ry = yy[:, diag_ind_y, diag_ind_y].unsqueeze(1).expand_as(zz)
-        P = (rx.transpose(2, 1) + ry - 2 * zz)
+        rx = xx[..., diag_ind_x, diag_ind_x].unsqueeze(-2).expand_as(zz.transpose(-2, -1))
+        ry = yy[..., diag_ind_y, diag_ind_y].unsqueeze(-2).expand_as(zz)
+        P = (rx.transpose(-2, -1) + ry - 2. * zz)
         return P
 
 
@@ -563,3 +563,25 @@ def std(x: T.Tensor, dim=None, unbiased=True, keepdim=False):
     """
 
     return T.sqrt(var(x, dim, unbiased, keepdim) + 1e-8)
+
+
+def break_dim(x: T.Tensor, dim: int, sizes=(-1,)):
+    """
+    Break input tensor at `dim` into sizes.
+
+    :param x:
+        an input tensor.
+    :param dim:
+        position at which the tensor is broken.
+    :param sizes:
+        sizes that the broken tensor is reshaped into.
+    :return:
+        a tensor with shape at `dim` is `sizes`.
+    """
+
+    if dim < 0:
+        dim += x.ndim
+
+    shape = tuple(x.shape)
+    new_shape = shape[:dim] + tuple(sizes) + shape[dim+1:]
+    return x.view(*new_shape)

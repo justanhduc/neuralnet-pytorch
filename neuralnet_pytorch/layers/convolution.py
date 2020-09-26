@@ -64,7 +64,6 @@ class Conv2d(nn.Conv2d, _LayerMethod):
         self.bias_init = bias_init
         self.border_mode = padding
         dilation = _pair(dilation)
-        groups = groups
 
         self.ks = [fs + (fs - 1) * (d - 1) for fs, d in zip(kernel_size, dilation)]
         if isinstance(padding, str):
@@ -268,7 +267,7 @@ class FC(nn.Linear, _LayerMethod):
         self.flatten = flatten
         self.keepdim = keepdim
         self.activation = utils.function(activation, **kwargs)
-        super().__init__(int(np.prod(input_shape[1:])) if flatten else input_shape[-1], out_features, bias)
+        super().__init__(int(np.prod(self.input_shape[1:])) if flatten else self.input_shape[-1], out_features, bias)
 
     def forward(self, input, *args, **kwargs):
         if self.flatten:

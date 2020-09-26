@@ -107,8 +107,6 @@ def pc2vox(pc: T.Tensor, vox_size=32, sigma=.005, analytical_gauss_norm=True):
     y = pc[..., 1]
     z = pc[..., 2]
 
-    vox_size = vox_size
-
     rng = T.linspace(-1.0, 1.0, vox_size).to(pc.device)
     xg, yg, zg = T.meshgrid(rng, rng, rng)  # [G,G,G]
 

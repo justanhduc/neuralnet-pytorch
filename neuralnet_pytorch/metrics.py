@@ -5,6 +5,7 @@ import torch.nn as nn
 
 from . import layers
 from . import utils
+from . import cuda_ext_available
 
 __all__ = ['huber_loss', 'first_derivative_loss', 'lp_loss', 'ssim', 'psnr', 'chamfer_loss', 'emd_loss', 'tv_reg',
            'spectral_norm']
@@ -80,7 +81,7 @@ def lp_loss(x, y, p=2, reduction='mean'):
         return reduce(T.abs(x - y) ** p)
 
 
-def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=True):
+def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=cuda_ext_available):
     """
     Calculates the Chamfer distance between two batches of point clouds.
     The Pytorch code is adapted from DenseLidarNet_.

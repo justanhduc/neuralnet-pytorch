@@ -1,4 +1,5 @@
 import torch.nn as nn
+from torch._six import container_abcs
 
 from .. import utils
 from ..utils import _image_shape, _matrix_shape, _pointset_shape
@@ -47,7 +48,7 @@ class BatchNorm1d(nn.BatchNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         input_shape = _matrix_shape(input_shape)
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
         self.input_shape = input_shape
@@ -110,7 +111,7 @@ class BatchNorm2d(nn.BatchNorm2d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         input_shape = _image_shape(input_shape)
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
         self.input_shape = input_shape
@@ -164,7 +165,7 @@ class LayerNorm(nn.LayerNorm, _LayerMethod):
     """
 
     def __init__(self, input_shape, eps=1e-5, elementwise_affine=True, activation=None, **kwargs):
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
         assert None not in input_shape[1:], 'All dims in input_shape must be specified except the first dim'
         self.input_shape = _matrix_shape(input_shape)
@@ -213,7 +214,7 @@ class InstanceNorm1d(nn.InstanceNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, activation=None,
                  **kwargs):
         input_shape = _matrix_shape(input_shape)
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
         self.input_shape = input_shape
@@ -263,7 +264,7 @@ class InstanceNorm2d(nn.InstanceNorm2d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False, activation=None,
                  **kwargs):
         input_shape = _image_shape(input_shape)
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
         self.input_shape = input_shape
@@ -354,7 +355,7 @@ class FeatureNorm1d(nn.BatchNorm1d, _LayerMethod):
     def __init__(self, input_shape, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True, activation=None,
                  no_scale=False, **kwargs):
         input_shape = _pointset_shape(input_shape)
-        assert isinstance(input_shape, (list, tuple)), 'input_shape must be a list or tuple, got %s' % type(
+        assert isinstance(input_shape, container_abcs.Iterable), 'input_shape must be a list or tuple, got %s' % type(
             input_shape)
 
         self.input_shape = input_shape
