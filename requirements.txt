@@ -9,3 +9,5 @@ tensorboard
 imageio
 gin-config
 future
+sympy
+git-python

@@ -20,41 +20,69 @@ to the current magical Pytorch.
 All the modules in the package directly subclass
 the corresponding modules from Pytorch,
 so everything should still be familiar.
+
+# At first glance
+Neuralnet-pytorch mostly preserves the same spirit of native Pytorch but in a 
+(hopefully) less verbose way.
+The most prominent feature of Neuralnet-pytorch is the ability to handle 
+input and output tensor shapes of operators abstractly 
+(powered by [Sympy](https://docs.sympy.org/latest/index.html)).
 For example, the following snippet in Pytorch
 
 ```
-from torch import nn
-model = nn.Sequential(
-    nn.Conv2d(1, 20, 5, padding=2),
-    nn.ReLU(),
-    nn.Conv2d(20, 64, 5, padding=2),
-    nn.ReLU()
+>>> from torch import nn
+>>> model = nn.Sequential(
+... nn.Conv2d(1, 20, 5, padding=0),
+... nn.ReLU(),
+... nn.Conv2d(20, 64, 5, padding=0),
+... nn.ReLU()
+... )
+>>> print(model)
+Sequential(
+  (0): Conv2d(1, 20, kernel_size=(5, 5), stride=(1, 1))
+  (1): ReLU()
+  (2): Conv2d(20, 64, kernel_size=(5, 5), stride=(1, 1))
+  (3): ReLU()
 )
 ```
 
 can be rewritten in Neuralnet-pytorch as 
 ```
-import neuralnet_pytorch as nnt
-model = nnt.Sequential(
-    nnt.Conv2d(1, 20, 5, padding='half', activation='relu'),
-    nnt.Conv2d(20, 64, 5, padding='half', activation='relu')
-)
+>>> import neuralnet_pytorch as nnt
+>>> model = nnt.Sequential(
+... nnt.Conv2d(1, 20, 5, padding=0, activation='relu'),
+... nnt.Conv2d(20, 64, 5, padding=0, activation='relu')
+... )
+>>> print(model)
+Sequential(
+  (0): Conv2d(1, 20, kernel_size=(5, 5), stride=(1, 1), activation=relu) -> (b0, 20, x0 - 4, x1 - 4)
+  (1): Conv2d(20, 64, kernel_size=(5, 5), stride=(1, 1), activation=relu) -> (b0, 64, x0 - 8, x1 - 8)
+) -> (b0, 64, x0 - 8, x1 - 8)
+
 ```
 
 which is the same as the native Pytorch, or 
 
 ```
-import neuralnet_pytorch as nnt
-model = nnt.Sequential(input_shape=1)
-model.add_module('conv1', nnt.Conv2d(model.output_shape, 20, 5, padding='half', activation='relu'))
-model.add_module('conv2', nnt.Conv2d(model.output_shape, 64, 5, padding='half', activation='relu'))
+>>> import neuralnet_pytorch as nnt
+>>> model = nnt.Sequential(input_shape=1)
+>>> model.conv1 = nnt.Conv2d(model.output_shape, 20, 5, padding=0, activation='relu')
+>>> model.conv2 = nnt.Conv2d(model.output_shape, 64, 5, padding=0, activation='relu')
+>>> print(model)
+Sequential(
+  (conv1): Conv2d(1, 20, kernel_size=(5, 5), stride=(1, 1), activation=relu) -> (b0, 20, x0 - 4, x1 - 4)
+  (conv2): Conv2d(20, 64, kernel_size=(5, 5), stride=(1, 1), activation=relu) -> (b0, 64, x0 - 8, x1 - 8)
+) -> (b0, 64, x0 - 8, x1 - 8)
 ```
+
 which frees you from a lot of memorization and manual calculations when adding one layer on top of another. 
 Theano folks will also find some reminiscence as many functions are highly inspired by Theano.  
 
 # Requirements
 
 [Pytorch](https://pytorch.org/) >= 1.0.0
+
+[Sympy](https://docs.sympy.org/latest/index.html)
 
 [Matplotlib](https://matplotlib.org/)
 
@@ -97,7 +125,7 @@ in which `option` can be `gin`/`geom`/`visdom`/`slack`.
 To install the version with some collected Cuda/C++ ops, use
 
 ```
-pip install neuralnet-pytorch --global-option="--cuda-ext"
+pip install git+git://github.com/justanhduc/neuralnet-pytorch.git@master --global-option="--cuda-ext"
 ```
 
 # Usages

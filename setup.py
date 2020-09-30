@@ -70,7 +70,7 @@ def setup_package():
         packages=find_packages(exclude=['docs', 'tests', 'examples']),
         ext_modules=cuda_ext,
         cmdclass=CMD_CLASS,
-        install_requires=['matplotlib', 'scipy', 'numpy', 'imageio', 'future'],
+        install_requires=['sympy', 'matplotlib', 'scipy', 'numpy', 'imageio', 'future', 'tensorboard', 'git-python'],
         extras_require={
             'gin': ['gin-config'],
             'geom': ['pykeops', 'geomloss'],
