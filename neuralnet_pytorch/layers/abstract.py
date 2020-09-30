@@ -255,8 +255,8 @@ class Sequential(nn.Sequential, _LayerMethod):
     """
 
     def __init__(self, *args, input_shape=None):
-        super().__init__(*args)
         self.input_shape = input_shape
+        super().__init__(*args)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -266,6 +266,40 @@ class Sequential(nn.Sequential, _LayerMethod):
         else:
             return self._get_item_by_idx(self._modules.values(), idx)
 
+    def add_module(self, name: str, module: T.nn.Module) -> None:
+        r"""Adds a child module to the current module.
+
+        The module can be accessed as an attribute using the given name.
+
+        Args:
+            name (string): name of the child module. The child module can be
+                accessed from this module using the given name
+            module (Module): child module to be added to the module.
+        """
+        if not isinstance(module, T.nn.Module) and module is not None:
+            raise TypeError("{} is not a Module subclass".format(
+                T.typename(module)))
+        elif not isinstance(name, T._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                T.typename(name)))
+        elif hasattr(self, name) and name not in self._modules:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("module name can't contain \".\"")
+        elif name == '':
+            raise KeyError("module name can't be empty string \"\"")
+
+        if not hasattr(module, 'input_shape'):
+            self.input_shape = None
+
+        if len(self._modules) == 0 and hasattr(module, 'input_shape') and self.input_shape is None:
+            self.input_shape = module.input_shape
+
+        if len(self._modules) > 0 and hasattr(module, 'input_shape') and self.output_shape is not None:
+            module.input_shape = self.output_shape
+
+        self._modules[name] = module
+
     def forward(self, input, *args, **kwargs):
         for module in self._modules.values():
             input = module(input, *args, **kwargs)
@@ -274,11 +308,11 @@ class Sequential(nn.Sequential, _LayerMethod):
     @property
     @utils.validate
     def output_shape(self):
-        if self.input_shape is None:
-            return None
-
         layers = list(self.children())
-        return layers[-1].output_shape if layers else self.input_shape
+        if layers is None or self.input_shape is None:
+            return self.input_shape
+        else:
+            return layers[-1].output_shape if hasattr(layers[-1], 'output_shape') else None
 
     def reset_parameters(self):
         for m in self.children():
