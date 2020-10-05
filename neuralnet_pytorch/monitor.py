@@ -441,7 +441,7 @@ class Monitor:
         if not runs:
             idx = 1
         else:
-            indices = sorted([int(r[len(self.prefix)+1:]) for r in runs])
+            indices = sorted([int(r[len(self.prefix)+1:]) if r[len(self.prefix)+1:].isnumeric() else 0 for r in runs])
             idx = indices[-1] + 1
 
         self.current_run = '{}-{}'.format(self.prefix, idx)
