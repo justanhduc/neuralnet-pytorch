@@ -248,6 +248,9 @@ class Monitor:
     send_slack : bool
         whether to send the statistics to Slack chatroom.
         Default: ``False``.
+    with_git : bool
+        whether to retrieve git information.
+        Default: ``False``.
     kwargs
         some miscellaneous options for Visdom and other functions.
 
@@ -278,7 +281,7 @@ class Monitor:
     _end_iter_ = 'end_iter'
 
     def __init__(self, model_name=None, root=None, current_folder=None, print_freq=100, num_iters=None,
-                 prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, **kwargs):
+                 prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, with_git=False, **kwargs):
         self._iter = 0
         self._last_epoch = 0
         self._num_since_beginning = collections.defaultdict(_spawn_defaultdict_ordereddict)
@@ -318,14 +321,18 @@ class Monitor:
         self.hist_folder = None
         self.current_run = None
         self.writer = None
+        self.with_git = with_git
 
-        if os.system('git rev-parse') == 0:
+        if with_git:
             import git
 
-            repo = git.Repo(os.getcwd())
-            head = repo.head.reference
-            self.git = Git(head.name, head.commit.hexsha, head.commit.message.rstrip(), head.commit.committed_date,
-                           head.commit.author.name, head.commit.author.email)
+            try:
+                repo = git.Repo(os.getcwd())
+                head = repo.head.reference
+                self.git = Git(head.name, head.commit.hexsha, head.commit.message.rstrip(), head.commit.committed_date,
+                               head.commit.author.name, head.commit.author.email)
+            except git.exc.InvalidGitRepositoryError:
+                self.git = None
         else:
             self.git = None
 
