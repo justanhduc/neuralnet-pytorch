@@ -530,30 +530,21 @@ def bulk_to_cuda_sparse(xs, non_blocking=False):
     return tuple([to_cuda_sparse(x, non_blocking=non_blocking) for x in xs])
 
 
-def batch_to_device(batch, device=None, non_blocking=False):
+def batch_to_device(batch, *args, **kwargs):
     """
     Moves a batch to the specified device.
 
     :param batch:
         a :class:`torch.Tensor` or an iterable of :class:`torch.Tensor`.
-    :param device:
-        the destination of the data.
-        Default: ``None``.
-    :param non_blocking:
-        whether to make the program continue without waiting for the move.
-        Default: False.
     :return:
         a copy of the original batch that on the specified device.
     """
 
-    if device is not None:
-        assert isinstance(device, (int, str, T.device)), 'Unknown type of device'
-
     if isinstance(batch, T.Tensor) or hasattr(batch, 'to'):
-        batch_device = batch.to(device=device, non_blocking=non_blocking)
+        batch_device = batch.to(*args, **kwargs)
     else:
         try:
-            batch_device = [batch_to_device(b, device, non_blocking) for b in batch]
+            batch_device = [batch_to_device(b, *args, **kwargs) for b in batch]
         except TypeError:
             root_logger.error('batch must be a Tensor or iterable', exc_info=True)
             raise
@@ -561,17 +552,14 @@ def batch_to_device(batch, device=None, non_blocking=False):
     return batch_device
 
 
-def batch_to_cuda(batch, non_blocking=False):
+def batch_to_cuda(batch, *args, **kwargs):
     """
     Moves a batch to the default CUDA device.
 
     :param batch:
         a :class:`torch.Tensor` or an iterable of :class:`torch.Tensor`.
-    :param non_blocking:
-        whether to make the program continue without waiting for the move.
-        Default: False.
     :return:
         a copy of the original batch that on the default CUDA device.
     """
 
-    return batch_to_device(batch, T.device('cuda'), non_blocking)
+    return batch_to_device(batch, T.device('cuda'), *args, **kwargs)
