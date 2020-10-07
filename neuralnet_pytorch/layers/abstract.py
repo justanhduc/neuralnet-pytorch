@@ -309,7 +309,7 @@ class Sequential(nn.Sequential, _LayerMethod):
     @utils.validate
     def output_shape(self):
         layers = list(self.children())
-        if layers is None or self.input_shape is None:
+        if not layers or self.input_shape is None:
             return self.input_shape
         else:
             return layers[-1].output_shape if hasattr(layers[-1], 'output_shape') else None
