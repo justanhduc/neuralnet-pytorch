@@ -324,15 +324,7 @@ class Monitor:
         self.with_git = with_git
 
         if with_git:
-            import git
-
-            try:
-                repo = git.Repo(os.getcwd())
-                head = repo.head.reference
-                self.git = Git(head.name, head.commit.hexsha, head.commit.message.rstrip(), head.commit.committed_date,
-                               head.commit.author.name, head.commit.author.email)
-            except git.exc.InvalidGitRepositoryError:
-                self.git = None
+            self.init_git()
         else:
             self.git = None
 
@@ -480,6 +472,19 @@ class Monitor:
             self.kwargs['username'] = 'me'
 
         self.send_slack = True
+
+    def init_git(self):
+        import git
+
+        try:
+            repo = git.Repo(os.getcwd())
+            head = repo.head.reference
+            self.git = Git(head.name, head.commit.hexsha, head.commit.message.rstrip(), head.commit.committed_date,
+                           head.commit.author.name, head.commit.author.email)
+        except git.exc.InvalidGitRepositoryError:
+            self.git = None
+
+        self.with_git = True if self.git is not None else False
 
     @check_path_init
     def show_git_info(self):
