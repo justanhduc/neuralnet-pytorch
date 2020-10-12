@@ -466,14 +466,6 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
         the exhaustive distance tensor between every pair of points in `x` and `y`.
     """
 
-    assert x.ndimension() in (2, 3) and y.ndimension() in (2, 3), \
-        'Input point clouds must be 2D or 3D tensors'
-    if x.ndimension() == 2:
-        x = x[None]
-
-    if y.ndimension() == 2:
-        y = y[None]
-
     if c_code:
         from ..extensions import batch_pairwise_dist
         return batch_pairwise_dist(x, y)
