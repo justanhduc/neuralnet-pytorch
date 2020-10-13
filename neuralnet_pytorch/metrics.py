@@ -117,7 +117,7 @@ def chamfer_loss(xyz1, xyz2, reduce='mean', c_code=cuda_ext_available):
         from .extensions import chamfer_distance
         dist1, dist2 = chamfer_distance(xyz1, xyz2)
     else:
-        P = utils.batch_pairwise_dist(xyz1, xyz2, c_code=c_code)
+        P = utils.batch_pairwise_sqdist(xyz1, xyz2, c_code=c_code)
         dist2, _ = T.min(P, 1)
         dist1, _ = T.min(P, 2)
     loss_2 = reduce(dist2)

@@ -5,7 +5,7 @@ import numpy as np
 import numbers
 
 __all__ = ['dimshuffle', 'shape_padleft', 'shape_padright', 'swapaxes', 'ravel_index', 'tile', 'repeat', 'block_diag',
-           'block_diag_sparse', 'get_bilinear_weights', 'interpolate_bilinear', 'batch_pairwise_dist', 'gram_matrix',
+           'block_diag_sparse', 'get_bilinear_weights', 'interpolate_bilinear', 'batch_pairwise_sqdist', 'gram_matrix',
            'var', 'std', 'break_dim']
 
 
@@ -449,9 +449,11 @@ def interpolate_bilinear(im: T.Tensor, x: T.Tensor, y: T.Tensor, output_shape=No
     return dimshuffle(output, (0, 3, 1, 2))
 
 
-def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
+def batch_pairwise_sqdist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
     """
-    Calculates the pair-wise distance between two sets of points.
+    Calculates the pair-wise square distance between two sets of points.
+    To get the Euclidean distance, explicit square root needs to be applied
+    to the output.
 
     :param x:
         a tensor of shape ``(m, nx, d)`` or ``(nx, d)``.
@@ -463,22 +465,20 @@ def batch_pairwise_dist(x: T.Tensor, y: T.Tensor, c_code=cuda_ext_available):
         whether to use a C++ implementation.
         Default: ``True`` when the CUDA extension is installed. ``False`` otherwise.
     :return:
-        the exhaustive distance tensor between every pair of points in `x` and `y`.
+        a tensor containing the exhaustive square distance between every pair of points
+        in `x` and `y` from the same batch.
     """
 
     if c_code:
         from ..extensions import batch_pairwise_dist
         return batch_pairwise_dist(x, y)
     else:
-        xx = T.einsum('...ij,...kj->...ik', x, x)
-        yy = T.einsum('...ij,...kj->...ik', y, y)
-        zz = T.einsum('...ij,...kj->...ik', x, y)
+        xx = T.sum(x ** 2, -1)
+        yy = T.sum(y ** 2, -1)
+        zz = T.matmul(x, y.transpose(-1, -2).contiguous())
 
-        diag_ind_x = T.arange(0, x.shape[-2]).to(device=x.device, dtype=T.long)
-        diag_ind_y = T.arange(0, y.shape[-2]).to(device=x.device, dtype=T.long)
-
-        rx = xx[..., diag_ind_x, diag_ind_x].unsqueeze(-2).expand_as(zz.transpose(-2, -1))
-        ry = yy[..., diag_ind_y, diag_ind_y].unsqueeze(-2).expand_as(zz)
+        rx = xx.unsqueeze(-2).expand_as(zz.transpose(-2, -1))
+        ry = yy.unsqueeze(-2).expand_as(zz)
         P = (rx.transpose(-2, -1) + ry - 2. * zz)
         return P
 

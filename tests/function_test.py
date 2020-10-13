@@ -139,7 +139,7 @@ def test_reshape(device):
 @pytest.mark.parametrize('device', dev)
 def test_batch_pairwise_distance(device):
     xyz = T.rand(1, 4, 3).to(device)
-    actual = nnt.utils.batch_pairwise_dist(xyz, xyz, c_code=False)
+    actual = nnt.utils.batch_pairwise_sqdist(xyz, xyz, c_code=False)
     testing.assert_allclose(T.diag(actual[0]), T.zeros(actual.shape[1]).to(device))
 
     if dev != 'cuda' or not nnt.cuda_ext_available:
@@ -147,8 +147,8 @@ def test_batch_pairwise_distance(device):
 
     xyz1 = T.rand(10, 4000, 3).to(device).requires_grad_(True)
     xyz2 = T.rand(10, 5000, 3).to(device)
-    expected = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=False)
-    actual = nnt.utils.batch_pairwise_dist(xyz1, xyz2, c_code=True)
+    expected = nnt.utils.batch_pairwise_sqdist(xyz1, xyz2, c_code=False)
+    actual = nnt.utils.batch_pairwise_sqdist(xyz1, xyz2, c_code=True)
     testing.assert_allclose(actual, expected)
 
     expected_cost = T.sum(expected)
@@ -162,8 +162,8 @@ def test_batch_pairwise_distance(device):
     testing.assert_allclose(actual_grad, expected_grad)
 
     for _ in range(10):
-        t1 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=False)
-        t2 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_dist, xyz1, xyz2, c_code=True)
+        t1 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_sqdist, xyz1, xyz2, c_code=False)
+        t2 = nnt.utils.time_cuda_module(nnt.utils.batch_pairwise_sqdist, xyz1, xyz2, c_code=True)
         print('pt: %f, cpp: %f' % (t1, t2))
 
 
