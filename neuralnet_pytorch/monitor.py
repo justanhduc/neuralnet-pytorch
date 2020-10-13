@@ -279,6 +279,8 @@ class Monitor:
     _end_epoch_ = 'end_epoch'
     _begin_iter_ = 'begin_iter'
     _end_iter_ = 'end_iter'
+    _hparams = 'hparams'
+    _hparam_metrics = 'hparam-metrics'
 
     def __init__(self, model_name=None, root=None, current_folder=None, print_freq=100, num_iters=None,
                  prefix='run', use_visdom=False, use_tensorboard=False, send_slack=False, with_git=False, **kwargs):
@@ -1048,6 +1050,22 @@ class Monitor:
         self.backup(files)
 
     @standardize_name
+    def add_hparam(self, name: str, value):
+        if name not in self._options[self._hparams].keys():
+            if isinstance(value, T.Tensor):
+                value = utils.to_numpy(value)
+
+            self._options[self._hparams][name] = value
+
+    @standardize_name
+    def add_metric(self, name: str, value):
+        if name not in self._options[self._hparam_metrics].keys():
+            if isinstance(value, T.Tensor):
+                value = utils.to_numpy(value)
+
+            self._options[self._hparam_metrics][name] = value
+
+    @standardize_name
     def plot(self, name: str, value, smooth=0, filter_outliers=True, **kwargs):
         """
         schedules a plot of scalar value.
@@ -1079,6 +1097,13 @@ class Monitor:
         if self.writer is not None:
             prefix = kwargs.pop('prefix', 'scalar/')
             self.writer.add_scalar(prefix + name.replace(' ', '-'), value, global_step=self.iter, **kwargs)
+
+    def plot_hparam(self):
+        try:
+            self.writer.add_hparams(dict(self._options[self._hparams]), dict(self._options[self._hparam_metrics]))
+        except AttributeError:
+            print('Tensorboard must be initialized to use this feature')
+            raise
 
     @standardize_name
     def plot_matrix(self, name: str, value, labels=None, show_values=False):
