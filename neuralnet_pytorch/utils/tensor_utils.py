@@ -199,6 +199,69 @@ def repeat(input: T.Tensor, repeats, dim=None):
     return T.repeat_interleave(input, repeats, dim)
 
 
+def moveaxis(x: T.Tensor, source, destination):
+    """
+    Adapted from Numpy.
+
+    Move axes of an array to new positions.
+
+    Other axes remain in their original order.
+
+    .. versionadded:: 1.11.0
+
+    :param x:
+        The array whose axes should be reordered.
+    :param source:
+        Original positions of the axes to move. These must be unique.
+    :param destination:
+        Destination positions for each of the original axes. These must also be unique.
+
+    :return:
+        Array with moved axes. This array is a view of the input array.
+
+    See Also
+    --------
+    :func:`~neuralnet_pytorch.utils.dimshuffle`
+    :func:`~neuralnet_pytorch.utils.swapaxes`
+
+    Examples
+    --------
+
+    >>> x = torch.zeros((3, 4, 5))
+    >>> nnt.utils.moveaxis(x, 0, -1).shape
+    (4, 5, 3)
+    >>> nnt.utils.moveaxis(x, -1, 0).shape
+    (5, 3, 4)
+
+    These all achieve the same result:
+
+    >>> x.permute(2, 1, 0).shape
+    (5, 4, 3)
+    >>> nnt.utils.swapaxes(x, 0, -1).shape
+    (5, 4, 3)
+    >>> nnt.utils.moveaxis(x, [0, 1], [-1, -2]).shape
+    (5, 4, 3)
+    >>> nnt.utils.moveaxis(x, [0, 1, 2], [-1, -2, -3]).shape
+    (5, 4, 3)
+
+    """
+
+    n = x.ndim
+    source = np.normalize_axis_tuple(source, n, 'source')
+    destination = np.normalize_axis_tuple(destination, n, 'destination')
+    if len(source) != len(destination):
+        raise ValueError('`source` and `destination` arguments must have '
+                         'the same number of elements')
+
+    order = [n for n in range(n) if n not in source]
+
+    for dest, src in sorted(zip(destination, source)):
+        order.insert(dest, src)
+
+    result = x.permute(*order)
+    return result
+
+
 def block_diag(*blocks):
     """
     Modified from scipy.linalg.block_diag.
